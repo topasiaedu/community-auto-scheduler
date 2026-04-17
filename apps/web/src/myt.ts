@@ -17,3 +17,32 @@ export function mytLocalToUtcIso(datetimeLocal: string): string {
   }
   return d.toISOString();
 }
+
+/**
+ * Returns true if the UTC instant is at least `minSeconds` after now.
+ */
+export function isUtcIsoAtLeastSecondsAhead(isoUtc: string, minSeconds: number): boolean {
+  const d = new Date(isoUtc);
+  if (Number.isNaN(d.getTime())) {
+    return false;
+  }
+  return d.getTime() >= Date.now() + minSeconds * 1000;
+}
+
+/**
+ * Converts a UTC ISO string to `datetime-local` value interpreted as MYT (same convention as {@link mytLocalToUtcIso}).
+ */
+export function utcIsoToDatetimeLocalMyt(isoUtc: string): string {
+  const d = new Date(isoUtc);
+  if (Number.isNaN(d.getTime())) {
+    return "";
+  }
+  const s = d.toLocaleString("sv-SE", { timeZone: "Asia/Kuala_Lumpur" });
+  const parts = s.split(" ");
+  if (parts.length < 2 || parts[0] === undefined || parts[1] === undefined) {
+    return "";
+  }
+  const date = parts[0];
+  const hm = parts[1].slice(0, 5);
+  return `${date}T${hm}`;
+}

@@ -19,16 +19,19 @@ enum MessageStatus {
   SENDING
   SENT
   FAILED
+  DRAFT
+  CANCELLED
 }
 
 model Project {
-  id               String              @id @default(cuid())
+  id               String                  @id @default(cuid())
   name             String
   description      String?
-  createdAt        DateTime            @default(now())
+  createdAt        DateTime                @default(now())
   messages         ScheduledMessage[]
   notifyRecipients NotifyRecipient[]
   members          ProjectMember[]
+  userPreferences  UserProjectPreference[]
 }
 
 // Links a Supabase Auth user id to a Project (see API X-Project-Id membership checks).
@@ -55,22 +58,40 @@ model NotifyRecipient {
 }
 
 model ScheduledMessage {
-  id              String        @id @default(cuid())
-  projectId       String
-  project         Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  groupJid        String
-  groupName       String
-  type            MessageType
-  copyText        String?
-  imageUrl        String?
-  pollQuestion    String?
-  pollOptions     String[]      @default([])
-  pollMultiSelect Boolean       @default(false)
-  scheduledAt     DateTime
-  status          MessageStatus @default(PENDING)
-  sentAt          DateTime?
-  error           String?
-  createdAt       DateTime      @default(now())
+  id               String        @id @default(cuid())
+  projectId        String
+  project          Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  groupJid         String
+  groupName        String
+  type             MessageType
+  copyText         String?
+  imageUrl         String?
+  pollQuestion     String?
+  pollOptions      String[]      @default([])
+  pollMultiSelect  Boolean       @default(false)
+  scheduledAt      DateTime
+  status           MessageStatus @default(PENDING)
+  sentAt           DateTime?
+  error            String?
+  createdAt        DateTime      @default(now())
+  /// pg-boss job id for cancel/reschedule; null for DRAFT rows not yet queued or legacy rows.
+  pgBossJobId      String?
+  /// Supabase Auth `user.id` of who created the schedule.
+  createdByUserId  String?
 
   @@index([projectId, scheduledAt])
+}
+
+/// Per-user UI preferences for a project (e.g. last selected WhatsApp group).
+model UserProjectPreference {
+  id            String   @id @default(cuid())
+  userId        String
+  projectId     String
+  project       Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  lastGroupJid  String?
+  lastGroupName String?
+  updatedAt     DateTime @updatedAt
+
+  @@unique([userId, projectId])
+  @@index([userId])
 }

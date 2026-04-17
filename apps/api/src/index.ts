@@ -15,6 +15,7 @@ import {
 } from "./auth/supabase-auth.js";
 import { loadApiEnv } from "./env.js";
 import { registerMessageRoutes } from "./routes/messages.js";
+import { registerPreferencesRoutes } from "./routes/preferences.js";
 import { registerProjectRoutes } from "./routes/projects.js";
 import { registerUploadRoutes } from "./routes/uploads.js";
 import { registerWaRoutes } from "./routes/wa.js";
@@ -77,7 +78,7 @@ async function main(): Promise<void> {
     return { ok: true as const, database: true, pgBoss: Boolean(installed) };
   });
 
-  const requireAuth = createRequireAuthPreHandler(env, prisma);
+  const requireAuth = createRequireAuthPreHandler(env);
   const requireProject = createRequireProjectAccessPreHandler(prisma);
 
   await fastify.register(async (authScope) => {
@@ -88,6 +89,7 @@ async function main(): Promise<void> {
       projectScope.addHook("preHandler", requireProject);
       registerWaRoutes(projectScope, waPool);
       registerMessageRoutes(projectScope, { prisma, boss });
+      registerPreferencesRoutes(projectScope, prisma);
       await registerUploadRoutes(projectScope, env);
     });
   });

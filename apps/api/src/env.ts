@@ -3,20 +3,6 @@ import { z } from "zod";
 /** Matches `packages/db/prisma/seed.ts` default project id. */
 export const DEFAULT_PROJECT_ID_VALUE = "nmcas-default-project";
 
-const truthyEnv = z
-  .string()
-  .optional()
-  .transform((raw) => {
-    if (raw === undefined) {
-      return true;
-    }
-    const s = raw.trim().toLowerCase();
-    if (s.length === 0) {
-      return true;
-    }
-    return s !== "0" && s !== "false" && s !== "no" && s !== "off";
-  });
-
 const EnvSchema = z.object({
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
   PORT: z.coerce.number().int().positive().default(3001),
@@ -29,11 +15,6 @@ const EnvSchema = z.object({
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1, "SUPABASE_SERVICE_ROLE_KEY is required for WA + Storage"),
   NMCAS_SESSION_BUCKET: z.string().min(1, "NMCAS_SESSION_BUCKET is required"),
   NMCAS_POST_MEDIA_BUCKET: z.string().min(1, "NMCAS_POST_MEDIA_BUCKET is required for post images"),
-  /**
-   * When true (default), a user with zero `ProjectMember` rows is auto-added to `DEFAULT_PROJECT_ID`
-   * on first authenticated request (requires that project to exist — run `npm run db:seed`).
-   */
-  AUTH_AUTO_JOIN_DEFAULT_PROJECT: truthyEnv,
   /**
    * Digits-only MSISDN (e.g. `60139968817` or set `+60139968817` in env; non-digits stripped).
    * Worker sends one WhatsApp text here when a scheduled message becomes `FAILED`.

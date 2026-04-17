@@ -57,4 +57,46 @@ export async function registerUploadRoutes(app: FastifyInstance, env: ApiEnv): P
 
     return { path: objectPath };
   });
+
+  /**
+   * Authenticated download of a post image for UI preview (private bucket).
+   * Query: `path` = object path returned from POST /uploads/post-image.
+   */
+  app.get("/uploads/post-media", async (req: FastifyRequest, reply: FastifyReply) => {
+    const projectId = req.activeProjectId;
+    if (projectId === undefined || projectId.length === 0) {
+      return reply.code(500).send({ error: "Project scope missing" });
+    }
+    const raw = (req.query as { path?: string }).path;
+    if (typeof raw !== "string" || raw.length === 0) {
+      return reply.code(400).send({ error: "Missing path query parameter" });
+    }
+    const objectPath = decodeURIComponent(raw.trim());
+    const prefix = `posts/${projectId}/`;
+    if (!objectPath.startsWith(prefix)) {
+      return reply.code(403).send({ error: "Invalid path for this project" });
+    }
+
+    const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const { data, error } = await supabase.storage
+      .from(env.NMCAS_POST_MEDIA_BUCKET)
+      .download(objectPath);
+    if (error !== null || data === null) {
+      return reply.code(404).send({ error: error?.message ?? "Not found" });
+    }
+    const buf = Buffer.from(await data.arrayBuffer());
+    const lower = objectPath.toLowerCase();
+    const type = lower.endsWith(".png")
+      ? "image/png"
+      : lower.endsWith(".webp")
+        ? "image/webp"
+        : lower.endsWith(".gif")
+          ? "image/gif"
+          : "image/jpeg";
+    reply.header("Content-Type", type);
+    reply.header("Cache-Control", "private, max-age=3600");
+    return reply.send(buf);
+  });
 }

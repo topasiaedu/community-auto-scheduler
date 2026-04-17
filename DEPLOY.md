@@ -44,7 +44,6 @@ Render sets **`PORT`**; the API already listens on `process.env.PORT`.
 | `SUPABASE_SERVICE_ROLE_KEY` | **Secret** — Storage + Baileys server-side. |
 | `NMCAS_SESSION_BUCKET` | Private bucket name. |
 | `NMCAS_POST_MEDIA_BUCKET` | Private bucket name. |
-| `AUTH_AUTO_JOIN_DEFAULT_PROJECT` | `true` or `false` as you prefer. |
 | `NMCAS_FAILURE_NOTIFY_MSISDN` | Optional; digits-only MSISDN for failure alerts. |
 
 Optional: `DIRECT_URL` only if you later add Prisma `directUrl` for migrations behind PgBouncer (not required for typical Supabase session URL).

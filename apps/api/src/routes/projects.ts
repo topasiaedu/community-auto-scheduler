@@ -1,6 +1,5 @@
 /**
- * Lists and creates Prisma `Project` rows for the authenticated Supabase user.
- * Any signed-in user may create a project and becomes its first `ProjectMember`.
+ * Lists and creates Prisma `Project` rows. Any signed-in user sees all projects and may create new ones (org-wide access; no per-user membership).
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -18,16 +17,14 @@ export function registerProjectRoutes(app: FastifyInstance, prisma: PrismaClient
     if (userId === undefined || userId.length === 0) {
       return reply.code(500).send({ error: "Auth context missing" });
     }
-    const rows = await prisma.projectMember.findMany({
-      where: { userId },
-      include: { project: true },
-      orderBy: { createdAt: "asc" },
+    const projects = await prisma.project.findMany({
+      orderBy: { name: "asc" },
     });
     return {
-      projects: rows.map((row) => ({
-        id: row.project.id,
-        name: row.project.name,
-        description: row.project.description,
+      projects: projects.map((p) => ({
+        id: p.id,
+        name: p.name,
+        description: p.description,
       })),
     };
   });
@@ -46,14 +43,8 @@ export function registerProjectRoutes(app: FastifyInstance, prisma: PrismaClient
       parsed.data.description !== undefined && parsed.data.description.trim().length > 0
         ? parsed.data.description.trim()
         : null;
-    const project = await prisma.$transaction(async (tx) => {
-      const created = await tx.project.create({
-        data: { name, description },
-      });
-      await tx.projectMember.create({
-        data: { userId, projectId: created.id },
-      });
-      return created;
+    const project = await prisma.project.create({
+      data: { name, description },
     });
     return reply.code(201).send({
       project: {

@@ -1,10 +1,9 @@
 /**
- * Supabase Auth JWT verification for Fastify (`Authorization: Bearer`) and optional
- * default-project bootstrap for first-time users.
+ * Supabase Auth JWT verification for Fastify (`Authorization: Bearer`).
+ * Project scope: any authenticated user may use any existing project (`X-Project-Id`) — no per-user membership.
  */
 
 import { createClient } from "@supabase/supabase-js";
-import { Prisma } from "@prisma/client";
 import type { FastifyReply, FastifyRequest, preHandlerHookHandler } from "fastify";
 import type { PrismaClient } from "@nmcas/db";
 import type { ApiEnv } from "../env.js";
@@ -24,45 +23,10 @@ export function extractBearerToken(header: string | string[] | undefined): strin
   return token;
 }
 
-function isUniqueConstraintViolation(err: unknown): boolean {
-  return err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002";
-}
-
 /**
- * Ensures the user has at least one project membership by joining the seeded default project.
+ * Verifies the Supabase JWT and attaches `req.authUserId`.
  */
-async function ensureDefaultProjectMembership(
-  prisma: PrismaClient,
-  env: ApiEnv,
-  userId: string,
-): Promise<void> {
-  const existing = await prisma.projectMember.findFirst({ where: { userId }, select: { id: true } });
-  if (existing !== null) {
-    return;
-  }
-  const projectId = env.DEFAULT_PROJECT_ID;
-  const project = await prisma.project.findUnique({ where: { id: projectId }, select: { id: true } });
-  if (project === null) {
-    return;
-  }
-  try {
-    await prisma.projectMember.create({
-      data: { userId, projectId },
-    });
-  } catch (err: unknown) {
-    if (!isUniqueConstraintViolation(err)) {
-      throw err;
-    }
-  }
-}
-
-/**
- * Verifies the Supabase JWT and attaches `req.authUserId`. Optionally auto-joins the default project.
- */
-export function createRequireAuthPreHandler(
-  env: ApiEnv,
-  prisma: PrismaClient,
-): preHandlerHookHandler {
+export function createRequireAuthPreHandler(env: ApiEnv): preHandlerHookHandler {
   const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
@@ -79,14 +43,12 @@ export function createRequireAuthPreHandler(
       return;
     }
     req.authUserId = data.user.id;
-    if (env.AUTH_AUTO_JOIN_DEFAULT_PROJECT) {
-      await ensureDefaultProjectMembership(prisma, env, data.user.id);
-    }
   };
 }
 
 /**
- * Reads `X-Project-Id`, confirms `ProjectMember` row, and sets `req.activeProjectId`.
+ * Reads `X-Project-Id`, confirms the project exists, and sets `req.activeProjectId`.
+ * All signed-in users may access any project (org-wide; no per-account ACL).
  */
 export function createRequireProjectAccessPreHandler(prisma: PrismaClient): preHandlerHookHandler {
   return async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
@@ -101,12 +63,12 @@ export function createRequireProjectAccessPreHandler(prisma: PrismaClient): preH
       await reply.code(400).send({ error: "Missing X-Project-Id header" });
       return;
     }
-    const member = await prisma.projectMember.findUnique({
-      where: { userId_projectId: { userId, projectId } },
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
       select: { id: true },
     });
-    if (member === null) {
-      await reply.code(403).send({ error: "Not a member of this project" });
+    if (project === null) {
+      await reply.code(404).send({ error: "Unknown project" });
       return;
     }
     req.activeProjectId = projectId;

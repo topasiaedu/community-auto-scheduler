@@ -7,7 +7,7 @@ declare module "fastify" {
   interface FastifyRequest {
     /** Supabase Auth user id after `Authorization: Bearer` verification. */
     authUserId?: string;
-    /** Project id from `X-Project-Id` after membership check. */
+    /** Project id from `X-Project-Id` after the project exists in the database. */
     activeProjectId?: string;
   }
 }

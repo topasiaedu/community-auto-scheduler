@@ -8,6 +8,7 @@ import makeWASocket, {
   DisconnectReason,
   fetchLatestBaileysVersion,
   type ConnectionState,
+  type GroupMetadata,
   type WASocket,
 } from "@whiskeysockets/baileys";
 import { isBoom } from "@hapi/boom";
@@ -30,8 +31,43 @@ let cachedWaVersion: [number, number, number] | undefined;
 
 export type WaGroupOption = {
   jid: string;
+  /** Raw WhatsApp group title (`subject`). */
   name: string;
+  /**
+   * Human-readable row for the picker: when the group is linked to a community,
+   * `"<Community subject> › <group subject>"` so "Announcement" rows are distinguishable.
+   */
+  label: string;
 };
+
+function resolveParentCommunityTitle(
+  metaById: Record<string, GroupMetadata>,
+  parentJid: string,
+): string {
+  const parent = metaById[parentJid];
+  const subj = parent?.subject?.trim();
+  if (subj !== undefined && subj.length > 0) {
+    return subj;
+  }
+  const local = parentJid.split("@")[0] ?? "";
+  return local.length > 8 ? `…${local.slice(-6)}` : parentJid;
+}
+
+/**
+ * Builds a list label from Baileys metadata. Uses `linkedParent` (community JID) when present
+ * so subgroups like "Announcement" show which community they belong to.
+ */
+function buildGroupListLabel(meta: GroupMetadata, metaById: Record<string, GroupMetadata>): string {
+  const subjectRaw = typeof meta.subject === "string" ? meta.subject.trim() : "";
+  const subject = subjectRaw.length > 0 ? subjectRaw : "(unnamed group)";
+
+  const linked = meta.linkedParent?.trim();
+  if (linked !== undefined && linked.length > 0) {
+    const parentTitle = resolveParentCommunityTitle(metaById, linked);
+    return `${parentTitle} › ${subject}`;
+  }
+  return subject;
+}
 
 export class WaManager {
   private readonly env: ApiEnv;
@@ -195,6 +231,8 @@ export class WaManager {
 
   /**
    * Groups the linked account participates in (for schedule UI picker).
+   * Excludes **community shells** (`isCommunity`): those JIDs are containers, not chats you can post to.
+   * `label` includes the parent community title when Baileys provides `linkedParent` (linked subgroups).
    */
   async fetchGroupOptions(): Promise<WaGroupOption[]> {
     await this.start();
@@ -203,7 +241,7 @@ export class WaManager {
       return [];
     }
     try {
-      const metaById = await sock.groupFetchAllParticipating();
+      const metaById = (await sock.groupFetchAllParticipating()) as Record<string, GroupMetadata>;
       const out: WaGroupOption[] = [];
       for (const jid of Object.keys(metaById)) {
         if (!jid.endsWith("@g.us")) {
@@ -213,9 +251,20 @@ export class WaManager {
         if (meta === undefined) {
           continue;
         }
-        out.push({ jid, name: meta.subject });
+        if (meta.isCommunity === true) {
+          continue;
+        }
+        const name =
+          typeof meta.subject === "string" && meta.subject.trim().length > 0
+            ? meta.subject.trim()
+            : "";
+        const label = buildGroupListLabel(meta, metaById);
+        out.push({ jid, name, label });
       }
-      out.sort((a, b) => a.name.localeCompare(b.name));
+      out.sort((a, b) => {
+        const byLabel = a.label.localeCompare(b.label);
+        return byLabel !== 0 ? byLabel : a.jid.localeCompare(b.jid);
+      });
       return out;
     } catch {
       return [];

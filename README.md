@@ -65,14 +65,16 @@ npm run dev
 
 **`WEB_ORIGIN`:** comma-separated list of allowed browser origins for CORS (must include the exact origin you open in the browser, including port). Example: `http://localhost:5173,http://localhost:5174`.
 
-**Auth (production-shaped):** the API expects **`Authorization: Bearer`** (Supabase session JWT) and **`X-Project-Id`** on scoped routes. Set **`SUPABASE_ANON_KEY`** on the API and **`VITE_SUPABASE_URL`** / **`VITE_SUPABASE_ANON_KEY`** for the web app (see [`.env.example`](.env.example)). The web UI signs in with Supabase; **`GET /projects`** lists memberships; **`POST /projects`** creates a project (signed-in users).
+**Auth (production-shaped):** the API expects **`Authorization: Bearer`** (Supabase session JWT) and **`X-Project-Id`** on scoped routes. Set **`SUPABASE_ANON_KEY`** on the API and **`VITE_SUPABASE_URL`** / **`VITE_SUPABASE_ANON_KEY`** for the web app (see [`.env.example`](.env.example)). The web UI signs in with Supabase; **`GET /projects`** lists **all** projects; **`POST /projects`** creates a project. There is **no per-user project ACL** — anyone who can sign in to your Supabase Auth project can use any NMCAS project; keep sign-up restricted if that matters.
 
 **Supabase Storage `fetch failed` on `sessions/.../creds.json`:** the API machine cannot reach your Supabase project over HTTPS (wrong `SUPABASE_URL`, VPN/firewall/DNS, project paused, or a short network blip). Session writes retry a few times; if it still fails, fix connectivity and restart the API. Until creds save reliably, WhatsApp stays disconnected and scheduled posts fail with **WhatsApp is not connected** (see the row error in **Scheduled messages**).
 
 **WhatsApp status flashing / terminal `connectionReplaced` (440):** another client is using the same session (second `npm run dev`, WhatsApp Web in a browser, or another linked device). Only one process should use the Storage session; close extra Web sessions and duplicate API processes. The API waits longer before reconnecting after 440 and only shows **connected** after the socket stays open for a few seconds, to avoid UI flicker.
 
-- **API:** `GET /health`, `GET /ready` (public); `GET`/`POST /projects` (auth); scoped routes: `GET/POST /messages`, `GET /wa/*`, `POST /wa/session/reset`, `POST /uploads/post-image` (auth + `X-Project-Id`). See [`apps/api/src/index.ts`](apps/api/src/index.ts).
-- **Web:** sign-in, project switcher, schedule **Post** or **Poll**, message list, WhatsApp QR ([`apps/web/src/App.tsx`](apps/web/src/App.tsx)). Dev: Vite proxies `/api/*` ([`apps/web/vite.config.ts`](apps/web/vite.config.ts)). Production: set **`VITE_API_URL`** to the API origin.
+- **API:** `GET /health`, `GET /ready` (public); `GET`/`POST /projects` (auth); scoped routes: `GET/POST /messages` (optional `?status=&type=`), `POST /messages/:id/cancel`, `POST /messages/:id/draft`, `PATCH /messages/:id` (draft update / publish), `GET/PATCH /preferences` (last group), `GET /wa/*`, `POST /wa/session/reset`, `POST /uploads/post-image` (auth + `X-Project-Id`). See [`apps/api/src/index.ts`](apps/api/src/index.ts).
+- **Web:** sign-in, project switcher, schedule **Post** or **Poll**, filters on scheduled list, draft/edit/cancel, last-group preference, single WhatsApp link panel, diagnostics collapsed ([`apps/web/src/App.tsx`](apps/web/src/App.tsx)). Dev: Vite proxies `/api/*` ([`apps/web/vite.config.ts`](apps/web/vite.config.ts)). Production: set **`VITE_API_URL`** to the API origin.
+
+Apply new migrations after pull: `npm run db:deploy` (or `npx prisma migrate deploy` in `packages/db`).
 
 ## Deployment
 

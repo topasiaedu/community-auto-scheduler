@@ -28,8 +28,28 @@ async function main(): Promise<void> {
   const prisma: PrismaClient = createPrismaClient();
   const waPool = new WaConnectionPool(env);
 
+  /**
+   * Append keepalive params to pg-boss's connection string so its internal `pg` pool
+   * does not get `08006` (connection failure during authentication) when Supabase's
+   * session-pooler drops idle TCP sockets after ~5 min of inactivity.
+   * These are libpq / TCP keepalive knobs (seconds), forwarded through `pg` to the OS.
+   */
+  function pgBossUrl(base: string): string {
+    try {
+      const u = new URL(base);
+      const set = (k: string, v: string) => { if (!u.searchParams.has(k)) u.searchParams.set(k, v); };
+      set("keepalives", "1");
+      set("keepalives_idle", "60");
+      set("keepalives_interval", "10");
+      set("keepalives_count", "3");
+      return u.toString();
+    } catch {
+      return base;
+    }
+  }
+
   const boss = new PgBoss({
-    connectionString: env.DATABASE_URL,
+    connectionString: pgBossUrl(env.DATABASE_URL),
     application_name: "nmcas-api",
     /**
      * Free-tier tuning:

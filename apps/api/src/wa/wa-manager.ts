@@ -21,7 +21,13 @@ import type { ApiEnv } from "../env.js";
 
 export type WaConnectionUiState = "disconnected" | "connecting" | "connected";
 
-const baileysLogger = pino({ level: "warn" });
+/**
+ * Production: log only errors — Baileys + Pino at `warn` still allocates heavily under poll load.
+ * OpenClaw-style stability is partly "one gateway process, one socket, low churn"; see adaptive UI polling.
+ */
+const baileysLogger = pino({
+  level: process.env.NODE_ENV === "production" ? "error" : "warn",
+});
 
 /**
  * Cached WA version tuple. `fetchLatestBaileysVersion()` makes an HTTP request to GitHub;
@@ -218,8 +224,15 @@ export class WaManager {
   /**
    * Boots only when there is no live transport. Reuses an existing open WebSocket
    * so UI polling does not interrupt the handshake or stable session.
+   *
+   * When `scheduleBootAfterClose` has armed a delayed reconnect, we must **not** boot here — otherwise
+   * every HTTP poll / worker tick bypasses backoff (e.g. 45s for `connectionReplaced`) and can open a
+   * second handshake while WhatsApp is still rotating the session → self-inflicted 440 / mutation churn.
    */
   private async ensureRunning(): Promise<void> {
+    if (this.reconnectTimer !== undefined) {
+      return;
+    }
     const sock = this.socket;
     const wsClosed = sock === undefined ? true : sock.ws.isClosed;
     if (sock !== undefined && !wsClosed) {
@@ -303,6 +316,7 @@ export class WaManager {
   }
 
   private async performResetSessionForLinking(): Promise<void> {
+    this.clearReconnectTimer();
     await this.tearDownLiveSocketIfAny();
     await this.flushCredSaves();
     this.latestQr = undefined;
@@ -427,10 +441,16 @@ export class WaManager {
       auth: state,
       version: cachedWaVersion,
       logger: baileysLogger,
-      printQRInTerminal: false,
       browser: ["NMCAS", "Chrome", "1.0.0"],
       syncFullHistory: false,
+      /** Skip chat history sync — scheduler use case; lowers CPU/RAM vs default `syncFullHistory: true`. */
+      shouldSyncHistoryMessage: () => false,
       markOnlineOnConnect: false,
+      /** Fewer decrypted events when we only send outbound scheduled traffic. */
+      emitOwnEvents: false,
+      /** Less retry metadata retained in heap (Baileys default `true`). */
+      enableRecentMessageCache: false,
+      generateHighQualityLinkPreview: false,
     });
     this.socket = sock;
 
@@ -457,8 +477,12 @@ export class WaManager {
         const code =
           err !== undefined && isBoom(err) ? err.output.statusCode : undefined;
         const shouldReconnect = code !== DisconnectReason.loggedOut;
+        const hint =
+          code === DisconnectReason.connectionReplaced
+            ? "Session superseded at WhatsApp (often overlapping reconnects or another process using the same Storage creds). Honor reconnect delay; avoid forcing immediate boot while a timer is armed."
+            : undefined;
         baileysLogger.warn(
-          { code, shouldReconnect },
+          { code, shouldReconnect, hint },
           "WhatsApp connection closed",
         );
         const closedSock = this.socket;

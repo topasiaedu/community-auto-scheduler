@@ -48,7 +48,12 @@ async function main(): Promise<void> {
     await handleSendScheduledMessageJobs(prisma, env, waPool, jobs);
   });
 
-  const fastify = Fastify({ logger: true });
+  const fastify = Fastify({
+    logger:
+      process.env.NODE_ENV === "production"
+        ? { level: "warn" }
+        : true,
+  });
 
   const webOrigins = env.WEB_ORIGIN.split(",")
     .map((s) => s.trim())

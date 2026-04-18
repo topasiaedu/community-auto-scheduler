@@ -465,19 +465,27 @@ export function useNmcasApp() {
     refreshHealth();
   }, [refreshHealth]);
 
+  /**
+   * Poll WA status sparingly when linked — constant 3s polls mirror OpenClaw's anti-pattern (HTTP churn
+   * against a gateway-owned socket). Fast while pairing; slow when connected to cut API/Baileys load.
+   */
   useEffect(() => {
     refreshWa();
-    const t = window.setInterval(refreshWa, 3000);
+    const pollMs = waState?.state === "connected" ? 20_000 : 4000;
+    const t = window.setInterval(refreshWa, pollMs);
     return () => window.clearInterval(t);
-  }, [refreshWa]);
+  }, [refreshWa, waState?.state]);
 
   useEffect(() => {
     void refreshQrFromServer();
+    if (waState?.state === "connected") {
+      return undefined;
+    }
     const t = window.setInterval(() => {
       void refreshQrFromServer();
-    }, 2500);
+    }, 3000);
     return () => window.clearInterval(t);
-  }, [refreshQrFromServer]);
+  }, [refreshQrFromServer, waState?.state]);
 
   useEffect(() => {
     if (waState?.state === "connected") {

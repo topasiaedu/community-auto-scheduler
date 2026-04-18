@@ -451,6 +451,15 @@ export class WaManager {
       /** Less retry metadata retained in heap (Baileys default `true`). */
       enableRecentMessageCache: false,
       generateHighQualityLinkPreview: false,
+      /**
+       * Free-tier timeout tuning — Render free instances are slower and Supabase Storage pre-key
+       * uploads (`count: 812` upload errors) fail when the WS times out mid-upload.
+       * connectTimeoutMs: 30s (was 20s) and defaultQueryTimeoutMs: 90s (was 60s) give the WS and
+       * pre-key upload round-trips more slack before Baileys declares a timeout disconnect (428).
+       */
+      connectTimeoutMs: 30_000,
+      defaultQueryTimeoutMs: 90_000,
+      keepAliveIntervalMs: 25_000,
     });
     this.socket = sock;
 

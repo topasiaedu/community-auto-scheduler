@@ -31,6 +31,15 @@ async function main(): Promise<void> {
   const boss = new PgBoss({
     connectionString: env.DATABASE_URL,
     application_name: "nmcas-api",
+    /**
+     * Free-tier tuning:
+     * - max:3   → only 3 pg connections for the job pool; Supabase free has ~60 direct slots and we share with Prisma.
+     * - maintenanceIntervalSeconds:120 → halve the default 60s maintenance queries to reduce idle DB traffic.
+     * - deleteAfterHours:24 → don't keep completed/failed jobs forever; shrinks pgboss tables on free storage.
+     */
+    max: 3,
+    maintenanceIntervalSeconds: 120,
+    deleteAfterHours: 24,
   });
 
   boss.on("error", (err: Error) => {
@@ -100,11 +109,14 @@ async function main(): Promise<void> {
   });
 
   let shuttingDown = false;
+  let keepaliveTimer: ReturnType<typeof setInterval> | undefined;
+
   const shutdown = async (signal: string) => {
     if (shuttingDown) {
       return;
     }
     shuttingDown = true;
+    clearInterval(keepaliveTimer);
     fastify.log.info({ signal }, "Shutting down");
     try {
       await fastify.close();
@@ -140,6 +152,28 @@ async function main(): Promise<void> {
   process.once("SIGTERM", () => {
     void shutdown("SIGTERM");
   });
+
+  /**
+   * Safety net: log unhandled rejections/exceptions without crashing the process on free-tier containers
+   * where an OOM or transient async failure would otherwise kill pg-boss + WA + the job worker together.
+   */
+  process.on("unhandledRejection", (reason: unknown) => {
+    console.error("[unhandledRejection]", reason);
+  });
+  process.on("uncaughtException", (err: Error) => {
+    console.error("[uncaughtException]", err);
+  });
+
+  /**
+   * Keepalive: run a cheap Prisma heartbeat every 4 minutes to prevent Supabase session-pooler from
+   * closing idle pg-boss / Prisma connections (free tier drops idle sockets after ~5 min of inactivity).
+   * pg-boss `08006` errors are typically this: pooler closed the TCP connection, next query fails on auth.
+   */
+  keepaliveTimer = setInterval(() => {
+    void prisma.$queryRaw`SELECT 1`.catch((err: unknown) => {
+      console.error("[keepalive] heartbeat failed:", err);
+    });
+  }, 4 * 60 * 1000);
 
   await fastify.listen({ port: env.PORT, host: "0.0.0.0" });
   fastify.log.info({ port: env.PORT }, "API listening");

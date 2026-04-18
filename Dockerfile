@@ -21,6 +21,10 @@ COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh
 
 ENV NODE_ENV=production
+# Give V8 a soft heap ceiling below the container RAM so the GC runs before OOM kills the process.
+# Render free (512 MB RAM): reserve ~80 MB for OS/native libs → 432 MB for Node heap.
+# Adjust if you upgrade to a larger instance.
+ENV NODE_OPTIONS="--max-old-space-size=432"
 
 EXPOSE 3001
 

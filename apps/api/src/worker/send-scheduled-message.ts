@@ -12,6 +12,27 @@ import { parseSendScheduledMessageJobData, type SendScheduledMessageJobData } fr
 const MAX_ERROR_LEN = 2000;
 const MAX_NOTIFY_ERROR_IN_BODY = 800;
 
+/** WhatsApp `sendMessage` has no built-in timeout; slow networks / cold Render can hang indefinitely. */
+const SEND_TO_WHATSAPP_TIMEOUT_MS = 180_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = globalThis.setTimeout(() => {
+      reject(new Error(`${label} timed out after ${String(ms)}ms`));
+    }, ms);
+    void promise.then(
+      (v) => {
+        globalThis.clearTimeout(t);
+        resolve(v);
+      },
+      (err: unknown) => {
+        globalThis.clearTimeout(t);
+        reject(err instanceof Error ? err : new Error(String(err)));
+      },
+    );
+  });
+}
+
 function truncateError(message: string): string {
   if (message.length <= MAX_ERROR_LEN) {
     return message;
@@ -70,13 +91,19 @@ async function markFailedWithNotify(
   row: ScheduledMessage,
   message: string,
 ): Promise<void> {
-  await prisma.scheduledMessage.update({
-    where: { id: row.id },
+  const result = await prisma.scheduledMessage.updateMany({
+    where: {
+      id: row.id,
+      status: { in: ["PENDING", "SENDING"] },
+    },
     data: {
       status: "FAILED",
       error: truncateError(message),
     },
   });
+  if (result.count === 0) {
+    return;
+  }
   await sendFailureWhatsAppAlert(env, waPool, row, message);
 }
 
@@ -155,7 +182,20 @@ export async function handleSendScheduledMessageJobs(
     if (parsed === null) {
       continue;
     }
-    await processOneJob(prisma, env, waPool, parsed);
+    try {
+      await processOneJob(prisma, env, waPool, parsed);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(
+        `[send-worker] unhandled error job=${job.id} scheduledMessageId=${parsed.scheduledMessageId}: ${msg}`,
+      );
+      const row = await prisma.scheduledMessage.findUnique({
+        where: { id: parsed.scheduledMessageId },
+      });
+      if (row !== null) {
+        await markFailedWithNotify(prisma, env, waPool, row, `Worker crashed: ${msg}`);
+      }
+    }
   }
 }
 
@@ -171,7 +211,7 @@ async function processOneJob(
   if (row === null) {
     return;
   }
-  if (row.status !== "PENDING") {
+  if (row.status !== "PENDING" && row.status !== "SENDING") {
     return;
   }
   if (row.type !== "POST" && row.type !== "POLL") {
@@ -179,13 +219,21 @@ async function processOneJob(
     return;
   }
 
-  const updated = await prisma.scheduledMessage.updateMany({
-    where: { id: row.id, status: "PENDING" },
-    data: { status: "SENDING" },
-  });
-  if (updated.count === 0) {
-    return;
+  if (row.status === "PENDING") {
+    const updated = await prisma.scheduledMessage.updateMany({
+      where: { id: row.id, status: "PENDING" },
+      data: { status: "SENDING" },
+    });
+    if (updated.count === 0) {
+      return;
+    }
+  } else {
+    console.warn(
+      `[send-worker] retrying row stuck in SENDING id=${row.id} projectId=${row.projectId}`,
+    );
   }
+
+  console.warn(`[send-worker] start id=${row.id} type=${row.type} projectId=${row.projectId}`);
 
   const projectId = row.projectId;
   await waPool.start(projectId);
@@ -197,20 +245,27 @@ async function processOneJob(
 
   if (row.type === "POLL") {
     try {
-      await sendPollToWhatsApp(sock, row);
+      await withTimeout(
+        sendPollToWhatsApp(sock, row),
+        SEND_TO_WHATSAPP_TIMEOUT_MS,
+        "WhatsApp poll sendMessage",
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : "sendMessage failed";
       await markFailedWithNotify(prisma, env, waPool, row, message);
       return;
     }
-    await prisma.scheduledMessage.update({
-      where: { id: row.id },
+    const sentPoll = await prisma.scheduledMessage.updateMany({
+      where: { id: row.id, status: "SENDING" },
       data: {
         status: "SENT",
         sentAt: new Date(),
         error: null,
       },
     });
+    if (sentPoll.count === 0) {
+      console.warn(`[send-worker] skip SENT update (row no longer SENDING) id=${row.id}`);
+    }
     return;
   }
 
@@ -232,19 +287,26 @@ async function processOneJob(
   }
 
   try {
-    await sendPostToWhatsApp(sock, row, imageBuffer);
+    await withTimeout(
+      sendPostToWhatsApp(sock, row, imageBuffer),
+      SEND_TO_WHATSAPP_TIMEOUT_MS,
+      "WhatsApp post sendMessage",
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : "sendMessage failed";
     await markFailedWithNotify(prisma, env, waPool, row, message);
     return;
   }
 
-  await prisma.scheduledMessage.update({
-    where: { id: row.id },
+  const sentPost = await prisma.scheduledMessage.updateMany({
+    where: { id: row.id, status: "SENDING" },
     data: {
       status: "SENT",
       sentAt: new Date(),
       error: null,
     },
   });
+  if (sentPost.count === 0) {
+    console.warn(`[send-worker] skip SENT update (row no longer SENDING) id=${row.id}`);
+  }
 }

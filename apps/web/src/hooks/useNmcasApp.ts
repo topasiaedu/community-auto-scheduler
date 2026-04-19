@@ -775,6 +775,29 @@ export function useNmcasApp() {
     })();
   };
 
+  /** Enqueue (or replace) pg-boss job — required after manual DB edits or stuck SENDING. */
+  const onRequeueMessage = (m: ScheduledMessage) => {
+    if (m.status !== "PENDING" && m.status !== "SENDING") {
+      return;
+    }
+    void (async () => {
+      const res = await authorizedFetch(`/messages/${m.id}/requeue`, { method: "POST" });
+      if (!res.ok) {
+        const err = (await res.json().catch(() => ({}))) as { error?: string };
+        setFormError(err.error ?? "Re-queue failed");
+        return;
+      }
+      const body = (await res.json().catch(() => ({}))) as { fireAt?: string };
+      const fireAtIso = typeof body.fireAt === "string" ? body.fireAt : null;
+      if (fireAtIso !== null) {
+        toast(`Send job re-queued (${formatRelativeTime(fireAtIso)} MYT)`);
+      } else {
+        toast("Send job re-queued.");
+      }
+      refreshMessages();
+    })();
+  };
+
   const onContinueDraft = (m: ScheduledMessage) => {
     if (m.status !== "DRAFT") {
       return;
@@ -975,6 +998,7 @@ export function useNmcasApp() {
     onSchedule,
     onStartEditPending,
     onCancelMessage,
+    onRequeueMessage,
     onContinueDraft,
     clearScheduleForm,
     onSubmitAuth,

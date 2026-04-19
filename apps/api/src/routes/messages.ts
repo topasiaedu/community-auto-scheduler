@@ -253,6 +253,58 @@ export function registerMessageRoutes(
     return { message: updated };
   });
 
+  /**
+   * Re-enqueue the pg-boss send job. Needed when the row was set to PENDING/SENDING in SQL (no job exists),
+   * or a stuck SENDING row lost its worker job after a deploy/crash.
+   */
+  app.post("/messages/:id/requeue", async (req: FastifyRequest, reply: FastifyReply) => {
+    const projectId = req.activeProjectId;
+    if (projectId === undefined || projectId.length === 0) {
+      return reply.code(500).send({ error: "Project scope missing" });
+    }
+    const id = typeof req.params === "object" && req.params !== null && "id" in req.params ? String(req.params.id) : "";
+    if (id.length === 0) {
+      return reply.code(400).send({ error: "Missing id" });
+    }
+    const row = await prisma.scheduledMessage.findFirst({
+      where: { id, projectId },
+    });
+    if (row === null) {
+      return reply.code(404).send({ error: "Message not found" });
+    }
+    if (row.status !== "PENDING" && row.status !== "SENDING") {
+      return reply
+        .code(400)
+        .send({ error: "Only PENDING or SENDING messages can be requeued" });
+    }
+    await safeCancelJob(boss, row.pgBossJobId);
+    const minFire = new Date(Date.now() + 15_000);
+    const fireAt =
+      row.scheduledAt.getTime() < minFire.getTime() ? minFire : row.scheduledAt;
+    const jobId = await boss.sendAfter(
+      SEND_SCHEDULED_MESSAGE_QUEUE,
+      { scheduledMessageId: row.id },
+      {},
+      fireAt,
+    );
+    if (jobId === null) {
+      return reply.code(500).send({ error: "Failed to enqueue job" });
+    }
+    const updated = await prisma.scheduledMessage.update({
+      where: { id: row.id },
+      data: {
+        status: "PENDING",
+        pgBossJobId: jobId,
+        error: null,
+      },
+    });
+    return {
+      message: updated,
+      jobId,
+      fireAt: fireAt.toISOString(),
+    };
+  });
+
   app.post("/messages/:id/draft", async (req: FastifyRequest, reply: FastifyReply) => {
     const projectId = req.activeProjectId;
     if (projectId === undefined || projectId.length === 0) {

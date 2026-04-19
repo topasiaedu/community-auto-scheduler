@@ -71,6 +71,7 @@ export function QueueCard({ message: m, vm }: QueueCardProps): ReactElement {
     requestCancelMessage,
     dismissCancelConfirm,
     onCancelMessage,
+    onRequeueMessage,
     onStartEditPending,
     onContinueDraft,
     session,
@@ -198,7 +199,7 @@ export function QueueCard({ message: m, vm }: QueueCardProps): ReactElement {
 
         {/* Actions */}
         {m.status === "PENDING" && !isConfirmingCancel ? (
-          <div className="mt-3 flex gap-2">
+          <div className="mt-3 flex flex-wrap gap-2">
             <Button
               size="sm"
               variant="outline"
@@ -209,11 +210,32 @@ export function QueueCard({ message: m, vm }: QueueCardProps): ReactElement {
             </Button>
             <Button
               size="sm"
+              variant="secondary"
+              className="h-7 text-xs"
+              onClick={() => void onRequeueMessage(m)}
+            >
+              Re-queue job
+            </Button>
+            <Button
+              size="sm"
               variant="ghost"
               className="h-7 text-xs text-muted-foreground"
               onClick={() => requestCancelMessage(m.id)}
             >
               Cancel send
+            </Button>
+          </div>
+        ) : null}
+
+        {m.status === "SENDING" && !isConfirmingCancel ? (
+          <div className="mt-3 flex gap-2">
+            <Button
+              size="sm"
+              variant="secondary"
+              className="h-7 text-xs"
+              onClick={() => void onRequeueMessage(m)}
+            >
+              Re-queue stuck send
             </Button>
           </div>
         ) : null}

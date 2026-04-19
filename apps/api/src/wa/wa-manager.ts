@@ -285,6 +285,25 @@ export class WaManager {
   }
 
   /**
+   * Force-restarts the Baileys socket regardless of its current state — use when a send timeout
+   * detected a dead connection that Baileys had not yet noticed (TCP half-open).
+   * Cancels any pending reconnect timer, tears down the existing socket, and boots fresh.
+   */
+  forceRestart(): Promise<void> {
+    this.waOpChain = this.waOpChain
+      .then(async () => {
+        baileysLogger.warn("WaManager force-restart requested (dead socket after send timeout)");
+        this.clearReconnectTimer();
+        await this.tearDownLiveSocketIfAny();
+        await this.boot();
+      })
+      .catch((err: unknown) => {
+        baileysLogger.error({ err }, "WaManager force-restart failed");
+      });
+    return this.waOpChain;
+  }
+
+  /**
    * Closes the socket on process shutdown (best-effort).
    */
   async shutdown(): Promise<void> {

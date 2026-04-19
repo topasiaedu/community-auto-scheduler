@@ -52,4 +52,16 @@ export class WaConnectionPool {
     const tasks = [...this.managers.values()].map((m) => m.shutdown());
     await Promise.all(tasks);
   }
+
+  /**
+   * Force-restarts the WA connection for a project — used after a send timeout to kick
+   * a dead socket that Baileys had not yet detected as closed.
+   */
+  forceRestart(projectId: string): void {
+    const manager = this.managers.get(projectId.trim());
+    if (manager === undefined) {
+      return;
+    }
+    void manager.forceRestart();
+  }
 }

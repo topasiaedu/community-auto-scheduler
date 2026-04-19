@@ -13,12 +13,23 @@ const MAX_ERROR_LEN = 2000;
 const MAX_NOTIFY_ERROR_IN_BODY = 800;
 
 /** WhatsApp `sendMessage` has no built-in timeout; slow networks / cold Render can hang indefinitely. */
-const SEND_TO_WHATSAPP_TIMEOUT_MS = 180_000;
+const SEND_TO_WHATSAPP_TIMEOUT_MS = 60_000;
+
+/**
+ * Thrown specifically when `withTimeout` fires — distinguishes a hung-socket timeout
+ * from a genuine WhatsApp error so the worker can reset to PENDING instead of FAILED.
+ */
+class WaSendTimeoutError extends Error {
+  constructor(ms: number, label: string) {
+    super(`${label} timed out after ${String(ms)}ms`);
+    this.name = "WaSendTimeoutError";
+  }
+}
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const t = globalThis.setTimeout(() => {
-      reject(new Error(`${label} timed out after ${String(ms)}ms`));
+      reject(new WaSendTimeoutError(ms, label));
     }, ms);
     void promise.then(
       (v) => {
@@ -243,6 +254,24 @@ async function processOneJob(
     return;
   }
 
+  /**
+   * Pre-send socket health check. Baileys may return a socket whose underlying WebSocket TCP
+   * connection was dropped by the remote peer without yet emitting a `connection.update` close
+   * event (TCP half-open). Attempting `sendMessage` on a closed socket hangs until our timeout.
+   * Detect this early: reset to PENDING so the rescue sweep retries after WA reconnects.
+   */
+  if (sock.ws.isClosed) {
+    console.warn(
+      `[send-worker] socket is closed before send — resetting to PENDING for retry id=${row.id}`,
+    );
+    await prisma.scheduledMessage.updateMany({
+      where: { id: row.id, status: { in: ["PENDING", "SENDING"] } },
+      data: { status: "PENDING", error: null },
+    });
+    waPool.forceRestart(projectId);
+    return;
+  }
+
   if (row.type === "POLL") {
     try {
       await withTimeout(
@@ -251,6 +280,17 @@ async function processOneJob(
         "WhatsApp poll sendMessage",
       );
     } catch (err) {
+      if (err instanceof WaSendTimeoutError) {
+        console.warn(
+          `[send-worker] poll send timed out — resetting to PENDING, force-restarting WA id=${row.id}`,
+        );
+        await prisma.scheduledMessage.updateMany({
+          where: { id: row.id, status: { in: ["PENDING", "SENDING"] } },
+          data: { status: "PENDING", error: null },
+        });
+        waPool.forceRestart(projectId);
+        return;
+      }
       const message = err instanceof Error ? err.message : "sendMessage failed";
       await markFailedWithNotify(prisma, env, waPool, row, message);
       return;
@@ -293,6 +333,17 @@ async function processOneJob(
       "WhatsApp post sendMessage",
     );
   } catch (err) {
+    if (err instanceof WaSendTimeoutError) {
+      console.warn(
+        `[send-worker] post send timed out — resetting to PENDING, force-restarting WA id=${row.id}`,
+      );
+      await prisma.scheduledMessage.updateMany({
+        where: { id: row.id, status: { in: ["PENDING", "SENDING"] } },
+        data: { status: "PENDING", error: null },
+      });
+      waPool.forceRestart(projectId);
+      return;
+    }
     const message = err instanceof Error ? err.message : "sendMessage failed";
     await markFailedWithNotify(prisma, env, waPool, row, message);
     return;

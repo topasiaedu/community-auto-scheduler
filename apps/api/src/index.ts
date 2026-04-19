@@ -21,6 +21,7 @@ import { registerUploadRoutes } from "./routes/uploads.js";
 import { registerWaRoutes } from "./routes/wa.js";
 import { SEND_SCHEDULED_MESSAGE_QUEUE } from "./queues.js";
 import { handleSendScheduledMessageJobs } from "./worker/send-scheduled-message.js";
+import { startRescueSweep } from "./rescue-sweep.js";
 import { WaConnectionPool } from "./wa/wa-pool.js";
 
 async function main(): Promise<void> {
@@ -130,6 +131,7 @@ async function main(): Promise<void> {
 
   let shuttingDown = false;
   let keepaliveTimer: ReturnType<typeof setInterval> | undefined;
+  let stopRescueSweep: (() => void) | undefined;
 
   const shutdown = async (signal: string) => {
     if (shuttingDown) {
@@ -137,6 +139,7 @@ async function main(): Promise<void> {
     }
     shuttingDown = true;
     clearInterval(keepaliveTimer);
+    stopRescueSweep?.();
     fastify.log.info({ signal }, "Shutting down");
     try {
       await fastify.close();
@@ -194,6 +197,8 @@ async function main(): Promise<void> {
       console.error("[keepalive] heartbeat failed:", err);
     });
   }, 4 * 60 * 1000);
+
+  stopRescueSweep = startRescueSweep(prisma, boss);
 
   await fastify.listen({ port: env.PORT, host: "0.0.0.0" });
   fastify.log.info({ port: env.PORT }, "API listening");

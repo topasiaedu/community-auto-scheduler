@@ -249,8 +249,19 @@ async function processOneJob(
   const projectId = row.projectId;
   await waPool.start(projectId);
   const sock = waPool.getSocket(projectId);
+
+  /**
+   * Socket is undefined during Baileys' reconnect backoff (e.g. after a 440 connectionReplaced).
+   * Do NOT mark FAILED — reset to PENDING so the rescue sweep retries once WA is back up.
+   */
   if (sock === undefined) {
-    await markFailedWithNotify(prisma, env, waPool, row, "WhatsApp is not connected");
+    console.warn(
+      `[send-worker] WA socket not ready — resetting to PENDING for retry id=${row.id}`,
+    );
+    await prisma.scheduledMessage.updateMany({
+      where: { id: row.id, status: { in: ["PENDING", "SENDING"] } },
+      data: { status: "PENDING", error: null },
+    });
     return;
   }
 
@@ -259,6 +270,8 @@ async function processOneJob(
    * connection was dropped by the remote peer without yet emitting a `connection.update` close
    * event (TCP half-open). Attempting `sendMessage` on a closed socket hangs until our timeout.
    * Detect this early: reset to PENDING so the rescue sweep retries after WA reconnects.
+   * Do NOT call forceRestart() here — that creates a 440 connectionReplaced loop by reconnecting
+   * immediately while the WA server may still see the old session as live.
    */
   if (sock.ws.isClosed) {
     console.warn(
@@ -268,7 +281,6 @@ async function processOneJob(
       where: { id: row.id, status: { in: ["PENDING", "SENDING"] } },
       data: { status: "PENDING", error: null },
     });
-    waPool.forceRestart(projectId);
     return;
   }
 
@@ -282,13 +294,12 @@ async function processOneJob(
     } catch (err) {
       if (err instanceof WaSendTimeoutError) {
         console.warn(
-          `[send-worker] poll send timed out — resetting to PENDING, force-restarting WA id=${row.id}`,
+          `[send-worker] poll send timed out — resetting to PENDING, Baileys will self-heal id=${row.id}`,
         );
         await prisma.scheduledMessage.updateMany({
           where: { id: row.id, status: { in: ["PENDING", "SENDING"] } },
           data: { status: "PENDING", error: null },
         });
-        waPool.forceRestart(projectId);
         return;
       }
       const message = err instanceof Error ? err.message : "sendMessage failed";
@@ -335,13 +346,12 @@ async function processOneJob(
   } catch (err) {
     if (err instanceof WaSendTimeoutError) {
       console.warn(
-        `[send-worker] post send timed out — resetting to PENDING, force-restarting WA id=${row.id}`,
+        `[send-worker] post send timed out — resetting to PENDING, Baileys will self-heal id=${row.id}`,
       );
       await prisma.scheduledMessage.updateMany({
         where: { id: row.id, status: { in: ["PENDING", "SENDING"] } },
         data: { status: "PENDING", error: null },
       });
-      waPool.forceRestart(projectId);
       return;
     }
     const message = err instanceof Error ? err.message : "sendMessage failed";

@@ -22,11 +22,13 @@ import type { ApiEnv } from "../env.js";
 export type WaConnectionUiState = "disconnected" | "connecting" | "connected";
 
 /**
- * Production: log only errors — Baileys + Pino at `warn` still allocates heavily under poll load.
- * OpenClaw-style stability is partly "one gateway process, one socket, low churn"; see adaptive UI polling.
+ * Production: suppress all Baileys/Pino output — internal Signal Protocol session logs ([rtkcc],
+ * [ratchet], [noise] etc.) are debug/trace level and flood Render logs on every reconnect.
+ * We emit our own structured logs for the worker and connection lifecycle.
+ * Dev: warn level to see connection events without the crypto noise.
  */
 const baileysLogger = pino({
-  level: process.env.NODE_ENV === "production" ? "error" : "warn",
+  level: process.env.NODE_ENV === "production" ? "silent" : "warn",
 });
 
 /**

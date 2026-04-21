@@ -277,6 +277,22 @@ export function registerMessageRoutes(
         .code(400)
         .send({ error: "Only PENDING, SENDING, or FAILED messages can be requeued" });
     }
+    /**
+     * Guard against re-queueing a SENDING row that still has an active worker job.
+     * A SENDING row within 5 minutes of its scheduledAt is likely mid-send — the worker
+     * has a 120s timeout so it cannot have already timed out. Forcing a requeue here would
+     * reset status to PENDING while the worker completes, causing a duplicate send when the
+     * new job fires. Rows stuck in SENDING for >5 min are safe to requeue (worker crashed).
+     */
+    if (row.status === "SENDING") {
+      const stuckCutoff = new Date(Date.now() - 5 * 60_000);
+      if (row.scheduledAt.getTime() > stuckCutoff.getTime()) {
+        return reply.code(409).send({
+          error:
+            "This message may still be sending. Please wait at least 5 minutes after the scheduled time before re-queueing a SENDING message.",
+        });
+      }
+    }
     await safeCancelJob(boss, row.pgBossJobId);
     const minFire = new Date(Date.now() + 15_000);
     const fireAt =

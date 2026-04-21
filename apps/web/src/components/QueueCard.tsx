@@ -63,6 +63,7 @@ type QueueCardProps = {
 export function QueueCard({ message: m, vm }: QueueCardProps): ReactElement {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewImageSrc, setPreviewImageSrc] = useState<string | null>(null);
+  const [requeueConfirming, setRequeueConfirming] = useState(false);
 
   const {
     expandedMessageId,
@@ -198,15 +199,39 @@ export function QueueCard({ message: m, vm }: QueueCardProps): ReactElement {
         ) : null}
 
         {/* Actions */}
-        {m.status === "FAILED" ? (
+        {m.status === "FAILED" && !requeueConfirming ? (
           <div className="mt-3 flex gap-2">
             <Button
               size="sm"
               variant="secondary"
               className="h-7 text-xs"
-              onClick={() => void onRequeueMessage(m)}
+              onClick={() => setRequeueConfirming(true)}
             >
               Re-queue
+            </Button>
+          </div>
+        ) : null}
+
+        {m.status === "FAILED" && requeueConfirming ? (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="text-xs font-medium text-destructive">
+              Only re-queue if the message was NOT sent to the group.
+            </span>
+            <Button
+              size="sm"
+              variant="destructive"
+              className="h-7 text-xs"
+              onClick={() => { setRequeueConfirming(false); void onRequeueMessage(m); }}
+            >
+              Yes, re-send
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 text-xs"
+              onClick={() => setRequeueConfirming(false)}
+            >
+              Cancel
             </Button>
           </div>
         ) : null}

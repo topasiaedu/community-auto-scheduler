@@ -198,6 +198,18 @@ export function QueueCard({ message: m, vm }: QueueCardProps): ReactElement {
         ) : null}
 
         {/* Actions */}
+        {m.status === "FAILED" ? (
+          <div className="mt-3 flex gap-2">
+            <Button
+              size="sm"
+              variant="secondary"
+              className="h-7 text-xs"
+              onClick={() => void onRequeueMessage(m)}
+            >
+              Re-queue
+            </Button>
+          </div>
+        ) : null}
         {m.status === "PENDING" && !isConfirmingCancel ? (
           <div className="mt-3 flex flex-wrap gap-2">
             <Button

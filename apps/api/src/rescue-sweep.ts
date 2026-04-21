@@ -18,7 +18,7 @@ import { SEND_SCHEDULED_MESSAGE_QUEUE } from "./queues.js";
 type PgBossInstance = InstanceType<typeof PgBoss>;
 
 /** PENDING rows that are this far overdue are eligible for rescue. */
-const PENDING_GRACE_MS = 30_000; // 30 s
+const PENDING_GRACE_MS = 10_000; // 10 s — fast pickup for manually-set rows
 
 /** SENDING rows that are this far overdue are eligible for rescue. */
 const SENDING_STUCK_MS = 10 * 60_000; // 10 min
@@ -151,7 +151,16 @@ async function enqueueNow(
       },
     });
     if (updated.count === 0) {
-      console.warn(`[rescue-sweep] row no longer PENDING/SENDING (race?) id=${messageId}`);
+      /**
+       * Row was concurrently updated (SENT/FAILED/CANCELLED) between our `isJobAlive` check
+       * and this write. Cancel the orphan job we just created so it does not fire uselessly.
+       */
+      console.warn(`[rescue-sweep] row no longer PENDING/SENDING (race?) id=${messageId} — cancelling orphan job ${jobId}`);
+      try {
+        await boss.cancel(SEND_SCHEDULED_MESSAGE_QUEUE, jobId);
+      } catch {
+        /* best-effort — orphan job will exit early via status guard in worker */
+      }
     } else {
       console.warn(`[rescue-sweep] re-enqueued id=${messageId} jobId=${jobId} fireAt=${fireAt.toISOString()}`);
     }

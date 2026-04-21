@@ -272,10 +272,10 @@ export function registerMessageRoutes(
     if (row === null) {
       return reply.code(404).send({ error: "Message not found" });
     }
-    if (row.status !== "PENDING" && row.status !== "SENDING") {
+    if (row.status !== "PENDING" && row.status !== "SENDING" && row.status !== "FAILED") {
       return reply
         .code(400)
-        .send({ error: "Only PENDING or SENDING messages can be requeued" });
+        .send({ error: "Only PENDING, SENDING, or FAILED messages can be requeued" });
     }
     await safeCancelJob(boss, row.pgBossJobId);
     const minFire = new Date(Date.now() + 15_000);

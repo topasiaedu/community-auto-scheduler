@@ -777,7 +777,7 @@ export function useNmcasApp() {
 
   /** Enqueue (or replace) pg-boss job — required after manual DB edits or stuck SENDING. */
   const onRequeueMessage = (m: ScheduledMessage) => {
-    if (m.status !== "PENDING" && m.status !== "SENDING") {
+    if (m.status !== "PENDING" && m.status !== "SENDING" && m.status !== "FAILED") {
       return;
     }
     void (async () => {

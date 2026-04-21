@@ -191,6 +191,17 @@ export async function handleSendScheduledMessageJobs(
   for (const job of jobs) {
     const parsed = parseSendScheduledMessageJobData(job.data);
     if (parsed === null) {
+      /**
+       * Malformed job payload — should never happen in normal operation since all code paths
+       * enqueue with `{ scheduledMessageId: string }`. Log as an error so it appears in
+       * Render logs; throwing here would cause pg-boss to retry the malformed job forever.
+       * Completing it (by not throwing) is correct — the rescue sweep will re-enqueue the
+       * row if it is still PENDING.
+       */
+      console.error(
+        `[send-worker] malformed job payload (id=${job.id}), skipping:`,
+        JSON.stringify(job.data),
+      );
       continue;
     }
     try {

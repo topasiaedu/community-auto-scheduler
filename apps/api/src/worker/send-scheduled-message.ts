@@ -13,7 +13,7 @@ const MAX_ERROR_LEN = 2000;
 const MAX_NOTIFY_ERROR_IN_BODY = 800;
 
 /** WhatsApp `sendMessage` has no built-in timeout; slow networks / cold Render can hang indefinitely. */
-const SEND_TO_WHATSAPP_TIMEOUT_MS = 60_000;
+const SEND_TO_WHATSAPP_TIMEOUT_MS = 120_000;
 
 /**
  * Thrown specifically when `withTimeout` fires — distinguishes a hung-socket timeout
@@ -293,13 +293,18 @@ async function processOneJob(
       );
     } catch (err) {
       if (err instanceof WaSendTimeoutError) {
+        /**
+         * Timeout with a connected socket is DANGEROUS to retry automatically.
+         * Baileys sends the message to WA immediately on `sendMessage` call — the promise
+         * only resolves when WA ACKs. A timeout means we don't know if the message was
+         * delivered. Re-setting to PENDING and retrying will cause duplicate sends.
+         * Mark FAILED so the user can check their group and re-queue manually if needed.
+         */
+        const timeoutMsg = `WhatsApp send timed out after ${String(SEND_TO_WHATSAPP_TIMEOUT_MS / 1000)}s — the message may already have been delivered. Check the group and use Re-queue if it was not sent.`;
         console.warn(
-          `[send-worker] poll send timed out — resetting to PENDING, Baileys will self-heal id=${row.id}`,
+          `[send-worker] poll send timed out — marking FAILED (may have sent) id=${row.id}`,
         );
-        await prisma.scheduledMessage.updateMany({
-          where: { id: row.id, status: { in: ["PENDING", "SENDING"] } },
-          data: { status: "PENDING", error: null },
-        });
+        await markFailedWithNotify(prisma, env, waPool, row, timeoutMsg);
         return;
       }
       const message = err instanceof Error ? err.message : "sendMessage failed";
@@ -345,13 +350,16 @@ async function processOneJob(
     );
   } catch (err) {
     if (err instanceof WaSendTimeoutError) {
+      /**
+       * Same as the POLL path above — a connected-socket timeout means the message was
+       * likely already transmitted to WhatsApp. Mark FAILED so the user can verify and
+       * manually re-queue rather than automatically sending a duplicate.
+       */
+      const timeoutMsg = `WhatsApp send timed out after ${String(SEND_TO_WHATSAPP_TIMEOUT_MS / 1000)}s — the message may already have been delivered. Check the group and use Re-queue if it was not sent.`;
       console.warn(
-        `[send-worker] post send timed out — resetting to PENDING, Baileys will self-heal id=${row.id}`,
+        `[send-worker] post send timed out — marking FAILED (may have sent) id=${row.id}`,
       );
-      await prisma.scheduledMessage.updateMany({
-        where: { id: row.id, status: { in: ["PENDING", "SENDING"] } },
-        data: { status: "PENDING", error: null },
-      });
+      await markFailedWithNotify(prisma, env, waPool, row, timeoutMsg);
       return;
     }
     const message = err instanceof Error ? err.message : "sendMessage failed";

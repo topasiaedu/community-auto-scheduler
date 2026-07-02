@@ -22,9 +22,12 @@ export function registerWaRoutes(app: FastifyInstance, waPool: WaConnectionPool)
     }
     const wa = waPool.getManager(projectId);
     await wa.start();
+    const hasQr = wa.getLatestQr() !== undefined;
+    // While a QR is active, report "connecting" so the UI shows the scanner (not a false green Connected).
+    const state = hasQr ? "connecting" : wa.getUiState();
     return {
-      state: wa.getUiState(),
-      hasQr: wa.getLatestQr() !== undefined,
+      state,
+      hasQr,
     };
   });
 
@@ -47,9 +50,11 @@ export function registerWaRoutes(app: FastifyInstance, waPool: WaConnectionPool)
     if (projectId === undefined) {
       return;
     }
+    const query = req.query as { refresh?: string } | undefined;
+    const forceRefresh = query?.refresh === "1" || query?.refresh === "true";
     const wa = waPool.getManager(projectId);
     await wa.start();
-    const groups = await wa.fetchGroupOptions();
+    const groups = await wa.fetchGroupOptions(forceRefresh);
     return { groups };
   });
 

@@ -12,8 +12,13 @@ const EnvSchema = z.object({
   SUPABASE_URL: z.string().url("SUPABASE_URL must be a valid URL"),
   /** Used with `auth.getUser(jwt)` to verify browser sessions (never use the service role for this). */
   SUPABASE_ANON_KEY: z.string().min(1, "SUPABASE_ANON_KEY is required for JWT verification"),
-  SUPABASE_SERVICE_ROLE_KEY: z.string().min(1, "SUPABASE_SERVICE_ROLE_KEY is required for WA + Storage"),
-  NMCAS_SESSION_BUCKET: z.string().min(1, "NMCAS_SESSION_BUCKET is required"),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().min(1, "SUPABASE_SERVICE_ROLE_KEY is required for Storage"),
+  /**
+   * whatsmeow session store. Use Supabase **direct** Postgres (`db.<ref>.supabase.co:5432`) so
+   * local and deployed API share the same WA session. Required when `DATABASE_URL` is the pooler.
+   * Local-only fallback: SQLite directory (e.g. `file:./data/wa-sessions`).
+   */
+  WHATSAPP_STORE_URL: z.string().min(1).optional(),
   NMCAS_POST_MEDIA_BUCKET: z.string().min(1, "NMCAS_POST_MEDIA_BUCKET is required for post images"),
   /**
    * Digits-only MSISDN (e.g. `60139968817` or set `+60139968817` in env; non-digits stripped).

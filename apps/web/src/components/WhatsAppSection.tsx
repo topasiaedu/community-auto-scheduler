@@ -167,7 +167,7 @@ export function WhatsAppSection({ vm }: WhatsAppSectionProps): ReactElement | nu
               size="sm"
               variant="outline"
               className="border-emerald-300 text-emerald-800 hover:bg-emerald-100"
-              onClick={() => void refreshGroups()}
+              onClick={() => void refreshGroups(true)}
             >
               {groups.length > 0 ? "Reload groups" : "Load groups"}
             </Button>

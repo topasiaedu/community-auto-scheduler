@@ -1,11 +1,11 @@
 # Deploy NMCAS (Render API + Vercel web)
 
-Hosting matches [`NMCAS-VAULT/wiki/overview.md`](NMCAS-VAULT/wiki/overview.md): **Render** runs the Node API (Baileys + pg-boss); **Vercel** serves the static Vite app; **Supabase** stays the DB + Storage + Auth.
+Hosting matches [`NMCAS-VAULT/wiki/overview.md`](NMCAS-VAULT/wiki/overview.md): **Render** runs the Node API (whatsmeow-node + pg-boss); **Vercel** serves the static Vite app; **Supabase** stays the DB + Storage + Auth.
 
 ## Prerequisites
 
 - GitHub repo connected to both platforms.
-- **Supabase** project: Postgres **session** URL (port `5432`) for `DATABASE_URL`, Storage buckets, Auth keys.
+- **Supabase** project: session pooler for `DATABASE_URL`, **direct** Postgres for `WHATSAPP_STORE_URL`, Storage buckets, Auth keys.
 - **Do not** commit `.env`; configure variables in each platform’s dashboard.
 
 ---
@@ -28,21 +28,21 @@ Render sets **`PORT`**; the API already listens on `process.env.PORT`.
 
 ### Free tier limitations
 
-- **Cold starts / sleep:** Free web services **spin down** after idle time. First request can be slow; **pg-boss** and **Baileys** need a process that is actually running—if the instance is asleep, scheduled jobs will not run until something wakes the service. For reliable scheduling and WA, use a **paid** instance or another always-on host when you outgrow free tier.
+- **Cold starts / sleep:** Free web services **spin down** after idle time. First request can be slow; **pg-boss** and **whatsmeow-node** need a process that is actually running—if the instance is asleep, scheduled jobs will not run until something wakes the service. For reliable scheduling and WA, use a **paid** instance or another always-on host when you outgrow free tier.
 - **No Blueprint required:** You configure the Docker service manually as above.
 
 ### Render environment variables
 
 | Variable | Notes |
 |----------|--------|
-| `DATABASE_URL` | Supabase Postgres **session** connection string (`:5432`). |
+| `DATABASE_URL` | Supabase Postgres **session pooler** (`:5432`, host `*.pooler.supabase.com`) for Prisma + pg-boss. |
+| `WHATSAPP_STORE_URL` | **Required** when `DATABASE_URL` is the pooler. Supabase **direct** Postgres (`db.<ref>.supabase.co:5432`) for whatsmeow sessions (shared local + Render). |
 | `PORT` | Usually injected by Render; only set manually if your dashboard requires it. |
 | `WEB_ORIGIN` | Your Vercel origins, comma-separated, e.g. `https://your-app.vercel.app`. |
 | `DEFAULT_PROJECT_ID` | Default `nmcas-default-project` if you use seed. |
 | `SUPABASE_URL` | Project URL. |
 | `SUPABASE_ANON_KEY` | `anon` `public` key (JWT verification). |
-| `SUPABASE_SERVICE_ROLE_KEY` | **Secret** — Storage + Baileys server-side. |
-| `NMCAS_SESSION_BUCKET` | Private bucket name. |
+| `SUPABASE_SERVICE_ROLE_KEY` | **Secret** — Storage (post images) server-side. |
 | `NMCAS_POST_MEDIA_BUCKET` | Private bucket name. |
 | `NMCAS_FAILURE_NOTIFY_MSISDN` | Optional; digits-only MSISDN for failure alerts. |
 

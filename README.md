@@ -11,10 +11,10 @@ Internal monorepo for **NMCAS** — compose, schedule, and auto-send WhatsApp me
 
 | Path | Role |
 |------|------|
-| `apps/api` | Fastify HTTP API, Prisma, **pg-boss** worker, Baileys (P2 Post + **P3 Poll** slice) |
+| `apps/api` | Fastify HTTP API, Prisma, **pg-boss** worker, **whatsmeow-node** (P2 Post + **P3 Poll** slice) |
 | `apps/web` | Vite + React + TypeScript UI shell |
 | `packages/db` | Prisma schema and `@nmcas/db` client export |
-| `packages/wa-session-storage` | Supabase Storage–backed Baileys auth state (from P0) |
+| `packages/wa-session-storage` | Legacy Baileys Storage adapter (P0 spike only; API uses Postgres whatsmeow store) |
 | `p0-spike` | Standalone WhatsApp + Storage spike — see [`p0-spike/README.md`](p0-spike/README.md) |
 
 ## First-time setup
@@ -26,7 +26,6 @@ Internal monorepo for **NMCAS** — compose, schedule, and auto-send WhatsApp me
    ```bash
    npm install
    npm run build -w @nmcas/db
-   npm run build -w @nmcas/wa-session-storage
    ```
 
 4. Apply database migrations (loads root `.env` and `apps/api/.env` via [`scripts/migrate-deploy.mjs`](scripts/migrate-deploy.mjs)):
@@ -45,7 +44,7 @@ Internal monorepo for **NMCAS** — compose, schedule, and auto-send WhatsApp me
    npm run db:seed
    ```
 
-6. **Supabase Storage:** ensure two **private** buckets exist (names must match `.env`): **`NMCAS_SESSION_BUCKET`** (Baileys session JSON, same as P0) and **`NMCAS_POST_MEDIA_BUCKET`** (scheduled post images).
+6. **Supabase Storage:** ensure a **private** bucket exists for scheduled post images: **`NMCAS_POST_MEDIA_BUCKET`**. WhatsApp sessions are stored in **Supabase Postgres** (per-project schema `wa_<projectId>`), not Storage. Set **`WHATSAPP_STORE_URL`** to the **direct** Postgres URI (`db.<ref>.supabase.co:5432`) so local and deployed API share the same WA session; keep **`DATABASE_URL`** on the session pooler for pg-boss + Prisma.
 
 ### Prisma and poolers
 
@@ -67,9 +66,11 @@ npm run dev
 
 **Auth (production-shaped):** the API expects **`Authorization: Bearer`** (Supabase session JWT) and **`X-Project-Id`** on scoped routes. Set **`SUPABASE_ANON_KEY`** on the API and **`VITE_SUPABASE_URL`** / **`VITE_SUPABASE_ANON_KEY`** for the web app (see [`.env.example`](.env.example)). The web UI signs in with Supabase; **`GET /projects`** lists **all** projects; **`POST /projects`** creates a project. There is **no per-user project ACL** — anyone who can sign in to your Supabase Auth project can use any NMCAS project; keep sign-up restricted if that matters.
 
-**Supabase Storage `fetch failed` on `sessions/.../creds.json`:** the API machine cannot reach your Supabase project over HTTPS (wrong `SUPABASE_URL`, VPN/firewall/DNS, project paused, or a short network blip). Session writes retry a few times; if it still fails, fix connectivity and restart the API. Until creds save reliably, WhatsApp stays disconnected and scheduled posts fail with **WhatsApp is not connected** (see the row error in **Scheduled messages**).
+**Supabase Storage `fetch failed` on post media:** the API machine cannot reach your Supabase project over HTTPS (wrong `SUPABASE_URL`, VPN/firewall/DNS, project paused, or a short network blip). Until connectivity is fixed, scheduled posts with images may fail. WhatsApp session state lives in Postgres, not Storage.
 
-**WhatsApp status flashing / terminal `connectionReplaced` (440):** another client is using the same session (second `npm run dev`, WhatsApp Web in a browser, or another linked device). Only one process should use the Storage session; close extra Web sessions and duplicate API processes. The API waits longer before reconnecting after 440 and only shows **connected** after the socket stays open for a few seconds, to avoid UI flicker.
+**WhatsApp QR / `WHATSAPP_STORE_URL` on Windows:** the direct Postgres host (`db.<ref>.supabase.co`) is often **IPv6-only**. If local dev cannot resolve or reach it (`ENOTFOUND` / `ENETUNREACH`), enable Supabase’s **IPv4 add-on** and put that URI in `WHATSAPP_STORE_URL`, or use `file:./data/wa-sessions` locally only (session will not match Render until IPv4 direct works).
+
+**WhatsApp status flashing:** after migration to whatsmeow-node, only one API process should use each project's session. Close duplicate `npm run dev` instances and extra WhatsApp Web sessions for the same number.
 
 - **API:** `GET /health`, `GET /ready` (public); `GET`/`POST /projects` (auth); scoped routes: `GET/POST /messages` (optional `?status=&type=`), `POST /messages/:id/cancel`, `POST /messages/:id/draft`, `PATCH /messages/:id` (draft update / publish), `GET/PATCH /preferences` (last group), `GET /wa/*`, `POST /wa/session/reset`, `POST /uploads/post-image` (auth + `X-Project-Id`). See [`apps/api/src/index.ts`](apps/api/src/index.ts).
 - **Web:** sign-in, project switcher, schedule **Post** or **Poll**, filters on scheduled list, draft/edit/cancel, last-group preference, single WhatsApp link panel, diagnostics collapsed ([`apps/web/src/App.tsx`](apps/web/src/App.tsx)). Dev: Vite proxies `/api/*` ([`apps/web/vite.config.ts`](apps/web/vite.config.ts)). Production: set **`VITE_API_URL`** to the API origin.
@@ -88,7 +89,7 @@ npm run typecheck
 
 ## pg-boss
 
-The API creates the queue **`send-scheduled-message`** ([`apps/api/src/queues.ts`](apps/api/src/queues.ts)). Creating a scheduled post enqueues a job with **`startAfter`** = `scheduledAt`; the worker sends via Baileys and updates row status.
+The API creates the queue **`send-scheduled-message`** ([`apps/api/src/queues.ts`](apps/api/src/queues.ts)). Creating a scheduled post enqueues a job with **`startAfter`** = `scheduledAt`; the worker sends via whatsmeow-node and updates row status.
 
 ## P2 / P3 manual test (e.g. “NMCAS test” group)
 

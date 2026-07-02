@@ -7,7 +7,7 @@ export const MIN_LEAD_SECONDS = 15;
 export type HealthResponse = {
   ok: boolean;
   queue: string;
-  sessionPathExample: string;
+  whatsappStoreExample: string;
 };
 
 export type WaStatusResponse = {

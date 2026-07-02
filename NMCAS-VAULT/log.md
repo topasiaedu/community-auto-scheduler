@@ -33,3 +33,9 @@ Append-only timeline of ingests, filed queries, and lint passes. Newest entries 
 - Raw: `raw/sources/2026-04-18-nmcas-implementation-snapshot.md`
 - Wiki: [[wiki/sources/2026-04-18-nmcas-implementation-snapshot]], [[wiki/overview]], [[wiki/concepts/wa-connection-pool]]
 - Notes: Documents Supabase Auth + `ProjectMember` + `X-Project-Id`, `WaConnectionPool` / `POST /projects`, worker failure WhatsApp to `NMCAS_FAILURE_NOTIFY_MSISDN`, polling-only live status, Docker + `DEPLOY.md` + `vercel.json` (Render Blueprint removed). PRD still recommends Render Starter for reliable scheduling; free tier + external ping noted as best-effort. P5 UI/SSE/responsive overhaul deferred.
+
+## [2026-04-21] ingest | Stability hardening session (duplicate sends, rescue sweep, race fixes)
+
+- Raw: `raw/sources/2026-04-21-stability-hardening-session.md`
+- Wiki: [[wiki/sources/2026-04-21-stability-hardening-session]], [[wiki/concepts/pg-boss-scheduler]], [[wiki/concepts/wa-connection-pool]], [[wiki/entities/scheduled-message]], [[wiki/overview]], [[index]]
+- Notes: Root-caused and fixed three production incidents: (1) duplicate sends caused by timeout resetting to PENDING with Baileys already having transmitted — fixed by timeout→FAILED for connected socket; (2) 440 connectionReplaced loop caused by forceRestart() in timeout path — removed; (3) manual PENDING DB edits not picked up — fixed by rescue sweep (2-min interval). New: rescue sweep, POST /messages/:id/requeue, Re-queue UI button with FAILED confirmation dialog, SENDING requeue 409 race guard, Baileys silent logger in prod, parse-failure logging. Confirmed Render free tier + UptimeRobot viable; Supabase free tier adequate with keepalive fixes. DRAFT and CANCELLED statuses documented in entity page. pgBossJobId field documented.

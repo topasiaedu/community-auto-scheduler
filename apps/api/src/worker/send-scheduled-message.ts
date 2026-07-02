@@ -1,10 +1,9 @@
 /**
- * pg-boss worker: send one ScheduledMessage (POST or POLL) via Baileys and update status.
+ * pg-boss worker: send one ScheduledMessage (POST or POLL) via whatsmeow-node and update status.
  */
 
 import { createClient } from "@supabase/supabase-js";
 import type { PrismaClient, ScheduledMessage } from "@nmcas/db";
-import type { WASocket } from "@whiskeysockets/baileys";
 import type { ApiEnv } from "../env.js";
 import type { WaConnectionPool } from "../wa/wa-pool.js";
 import { parseSendScheduledMessageJobData, type SendScheduledMessageJobData } from "../types/send-scheduled-message.js";
@@ -12,12 +11,12 @@ import { parseSendScheduledMessageJobData, type SendScheduledMessageJobData } fr
 const MAX_ERROR_LEN = 2000;
 const MAX_NOTIFY_ERROR_IN_BODY = 800;
 
-/** WhatsApp `sendMessage` has no built-in timeout; slow networks / cold Render can hang indefinitely. */
+/** WhatsApp send has no built-in timeout; slow networks / cold Render can hang indefinitely. */
 const SEND_TO_WHATSAPP_TIMEOUT_MS = 120_000;
 
 /**
- * Thrown specifically when `withTimeout` fires — distinguishes a hung-socket timeout
- * from a genuine WhatsApp error so the worker can reset to PENDING instead of FAILED.
+ * Thrown specifically when `withTimeout` fires — distinguishes a hung send
+ * from a genuine WhatsApp error so the worker can mark FAILED instead of retrying.
  */
 class WaSendTimeoutError extends Error {
   constructor(ms: number, label: string) {
@@ -66,9 +65,22 @@ function formatScheduledAtMyt(d: Date): string {
   });
 }
 
+function guessImageMimetype(objectPath: string): string {
+  const lower = objectPath.toLowerCase();
+  if (lower.endsWith(".png")) {
+    return "image/png";
+  }
+  if (lower.endsWith(".webp")) {
+    return "image/webp";
+  }
+  if (lower.endsWith(".gif")) {
+    return "image/gif";
+  }
+  return "image/jpeg";
+}
+
 /**
- * Sends a single ops alert on the same project's Baileys socket (PRD §9 style).
- * Swallows errors so a notify failure never breaks the worker.
+ * Sends a single ops alert on the same project's WhatsApp client.
  */
 async function sendFailureWhatsAppAlert(
   env: ApiEnv,
@@ -80,13 +92,13 @@ async function sendFailureWhatsAppAlert(
   const jid = `${msisdn}@s.whatsapp.net`;
   try {
     await waPool.start(row.projectId);
-    const sock = waPool.getSocket(row.projectId);
-    if (sock === undefined) {
+    if (!(await waPool.isSendReady(row.projectId))) {
       return;
     }
+    const wa = waPool.getManager(row.projectId);
     const whenMyt = formatScheduledAtMyt(row.scheduledAt);
     const text = `[NMCAS] Failed to send scheduled message to ${row.groupName} at ${whenMyt} MYT. Error: ${truncateForNotifyBody(errorMessage)}`;
-    await sock.sendMessage(jid, { text });
+    await wa.sendDirectText(jid, text);
   } catch {
     /* ignore — do not fail the job handler because alert delivery failed */
   }
@@ -121,10 +133,7 @@ async function markFailedWithNotify(
 /**
  * Downloads post image bytes from the private post-media bucket (object path stored on the row).
  */
-async function downloadPostImage(
-  env: ApiEnv,
-  objectPath: string,
-): Promise<Buffer> {
+async function downloadPostImage(env: ApiEnv, objectPath: string): Promise<Buffer> {
   const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
@@ -135,48 +144,6 @@ async function downloadPostImage(
     throw new Error(`Storage download failed: ${error?.message ?? "no data"}`);
   }
   return Buffer.from(await data.arrayBuffer());
-}
-
-/**
- * Sends WhatsApp content for a POST row (text and/or image).
- */
-async function sendPostToWhatsApp(
-  sock: WASocket,
-  msg: ScheduledMessage,
-  imageBuffer: Buffer | undefined,
-): Promise<void> {
-  const text = msg.copyText ?? "";
-  if (imageBuffer !== undefined) {
-    if (text.trim().length > 0) {
-      await sock.sendMessage(msg.groupJid, {
-        image: imageBuffer,
-        caption: text,
-      });
-    } else {
-      await sock.sendMessage(msg.groupJid, { image: imageBuffer });
-    }
-    return;
-  }
-  await sock.sendMessage(msg.groupJid, { text });
-}
-
-/**
- * Sends a native WhatsApp poll for a POLL row (`selectableCount` 1 = single answer, else multi).
- */
-async function sendPollToWhatsApp(sock: WASocket, msg: ScheduledMessage): Promise<void> {
-  const question = msg.pollQuestion?.trim() ?? "";
-  const values = msg.pollOptions.map((o) => o.trim()).filter((o) => o.length > 0);
-  if (question.length === 0 || values.length < 2) {
-    throw new Error("Poll row is missing question or needs at least two options");
-  }
-  const selectableCount = msg.pollMultiSelect ? values.length : 1;
-  await sock.sendMessage(msg.groupJid, {
-    poll: {
-      name: question,
-      values,
-      selectableCount,
-    },
-  });
 }
 
 /**
@@ -191,13 +158,6 @@ export async function handleSendScheduledMessageJobs(
   for (const job of jobs) {
     const parsed = parseSendScheduledMessageJobData(job.data);
     if (parsed === null) {
-      /**
-       * Malformed job payload — should never happen in normal operation since all code paths
-       * enqueue with `{ scheduledMessageId: string }`. Log as an error so it appears in
-       * Render logs; throwing here would cause pg-boss to retry the malformed job forever.
-       * Completing it (by not throwing) is correct — the rescue sweep will re-enqueue the
-       * row if it is still PENDING.
-       */
       console.error(
         `[send-worker] malformed job payload (id=${job.id}), skipping:`,
         JSON.stringify(job.data),
@@ -259,34 +219,11 @@ async function processOneJob(
 
   const projectId = row.projectId;
   await waPool.start(projectId);
-  const sock = waPool.getSocket(projectId);
+  const wa = waPool.getManager(projectId);
 
-  /**
-   * Socket is undefined during Baileys' reconnect backoff (e.g. after a 440 connectionReplaced).
-   * Do NOT mark FAILED — reset to PENDING so the rescue sweep retries once WA is back up.
-   */
-  if (sock === undefined) {
+  if (!(await waPool.isSendReady(projectId))) {
     console.warn(
-      `[send-worker] WA socket not ready — resetting to PENDING for retry id=${row.id}`,
-    );
-    await prisma.scheduledMessage.updateMany({
-      where: { id: row.id, status: { in: ["PENDING", "SENDING"] } },
-      data: { status: "PENDING", error: null },
-    });
-    return;
-  }
-
-  /**
-   * Pre-send socket health check. Baileys may return a socket whose underlying WebSocket TCP
-   * connection was dropped by the remote peer without yet emitting a `connection.update` close
-   * event (TCP half-open). Attempting `sendMessage` on a closed socket hangs until our timeout.
-   * Detect this early: reset to PENDING so the rescue sweep retries after WA reconnects.
-   * Do NOT call forceRestart() here — that creates a 440 connectionReplaced loop by reconnecting
-   * immediately while the WA server may still see the old session as live.
-   */
-  if (sock.ws.isClosed) {
-    console.warn(
-      `[send-worker] socket is closed before send — resetting to PENDING for retry id=${row.id}`,
+      `[send-worker] WA not ready — resetting to PENDING for retry id=${row.id}`,
     );
     await prisma.scheduledMessage.updateMany({
       where: { id: row.id, status: { in: ["PENDING", "SENDING"] } },
@@ -296,21 +233,21 @@ async function processOneJob(
   }
 
   if (row.type === "POLL") {
+    const question = row.pollQuestion?.trim() ?? "";
+    const values = row.pollOptions.map((o) => o.trim()).filter((o) => o.length > 0);
+    if (question.length === 0 || values.length < 2) {
+      await markFailedWithNotify(prisma, env, waPool, row, "Poll row is missing question or needs at least two options");
+      return;
+    }
+    const selectableCount = row.pollMultiSelect ? values.length : 1;
     try {
       await withTimeout(
-        sendPollToWhatsApp(sock, row),
+        wa.sendPoll(row.groupJid, question, values, selectableCount),
         SEND_TO_WHATSAPP_TIMEOUT_MS,
-        "WhatsApp poll sendMessage",
+        "WhatsApp poll send",
       );
     } catch (err) {
       if (err instanceof WaSendTimeoutError) {
-        /**
-         * Timeout with a connected socket is DANGEROUS to retry automatically.
-         * Baileys sends the message to WA immediately on `sendMessage` call — the promise
-         * only resolves when WA ACKs. A timeout means we don't know if the message was
-         * delivered. Re-setting to PENDING and retrying will cause duplicate sends.
-         * Mark FAILED so the user can check their group and re-queue manually if needed.
-         */
         const timeoutMsg = `WhatsApp send timed out after ${String(SEND_TO_WHATSAPP_TIMEOUT_MS / 1000)}s — the message may already have been delivered. Check the group and use Re-queue if it was not sent.`;
         console.warn(
           `[send-worker] poll send timed out — marking FAILED (may have sent) id=${row.id}`,
@@ -318,7 +255,7 @@ async function processOneJob(
         await markFailedWithNotify(prisma, env, waPool, row, timeoutMsg);
         return;
       }
-      const message = err instanceof Error ? err.message : "sendMessage failed";
+      const message = err instanceof Error ? err.message : "send failed";
       await markFailedWithNotify(prisma, env, waPool, row, message);
       return;
     }
@@ -337,9 +274,11 @@ async function processOneJob(
   }
 
   let imageBuffer: Buffer | undefined;
+  let imageMimetype = "image/jpeg";
   if (row.imageUrl !== null && row.imageUrl.length > 0) {
     try {
       imageBuffer = await downloadPostImage(env, row.imageUrl);
+      imageMimetype = guessImageMimetype(row.imageUrl);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Image download failed";
       await markFailedWithNotify(prisma, env, waPool, row, message);
@@ -355,17 +294,12 @@ async function processOneJob(
 
   try {
     await withTimeout(
-      sendPostToWhatsApp(sock, row, imageBuffer),
+      wa.sendPost(row.groupJid, text, imageBuffer, imageMimetype),
       SEND_TO_WHATSAPP_TIMEOUT_MS,
-      "WhatsApp post sendMessage",
+      "WhatsApp post send",
     );
   } catch (err) {
     if (err instanceof WaSendTimeoutError) {
-      /**
-       * Same as the POLL path above — a connected-socket timeout means the message was
-       * likely already transmitted to WhatsApp. Mark FAILED so the user can verify and
-       * manually re-queue rather than automatically sending a duplicate.
-       */
       const timeoutMsg = `WhatsApp send timed out after ${String(SEND_TO_WHATSAPP_TIMEOUT_MS / 1000)}s — the message may already have been delivered. Check the group and use Re-queue if it was not sent.`;
       console.warn(
         `[send-worker] post send timed out — marking FAILED (may have sent) id=${row.id}`,
@@ -373,7 +307,7 @@ async function processOneJob(
       await markFailedWithNotify(prisma, env, waPool, row, timeoutMsg);
       return;
     }
-    const message = err instanceof Error ? err.message : "sendMessage failed";
+    const message = err instanceof Error ? err.message : "send failed";
     await markFailedWithNotify(prisma, env, waPool, row, message);
     return;
   }

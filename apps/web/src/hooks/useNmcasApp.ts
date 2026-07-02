@@ -326,18 +326,22 @@ export function useNmcasApp() {
     }
   }, [authorizedFetch, session, selectedProjectId]);
 
-  const refreshGroups = useCallback(() => {
-    if (session === null || selectedProjectId.length === 0) {
-      setGroups([]);
-      return;
-    }
-    void authorizedFetch("/wa/groups")
-      .then((r) => r.json() as Promise<{ groups: WaGroup[] }>)
-      .then((j) =>
-        setGroups(dedupeWaGroupsByJid(j.groups.map((row) => normalizeWaGroupRow(row)))),
-      )
-      .catch(() => setGroups([]));
-  }, [authorizedFetch, session, selectedProjectId]);
+  const refreshGroups = useCallback(
+    (forceRefresh = false) => {
+      if (session === null || selectedProjectId.length === 0) {
+        setGroups([]);
+        return;
+      }
+      const path = forceRefresh ? "/wa/groups?refresh=1" : "/wa/groups";
+      void authorizedFetch(path)
+        .then((r) => r.json() as Promise<{ groups: WaGroup[] }>)
+        .then((j) =>
+          setGroups(dedupeWaGroupsByJid(j.groups.map((row) => normalizeWaGroupRow(row)))),
+        )
+        .catch(() => setGroups([]));
+    },
+    [authorizedFetch, session, selectedProjectId],
+  );
 
   const refreshMessages = useCallback(() => {
     if (session === null || selectedProjectId.length === 0) {
@@ -905,8 +909,8 @@ export function useNmcasApp() {
     })();
   };
 
-  const waConnected = waState?.state === "connected";
-  const waConnecting = waState?.state === "connecting";
+  const waConnected = waState?.state === "connected" && waState?.hasQr !== true;
+  const waConnecting = waState?.state === "connecting" || waState?.hasQr === true;
   const showLinkHelp = waState !== null && !waConnected;
   const waStatusUnavailable = waState === null;
 

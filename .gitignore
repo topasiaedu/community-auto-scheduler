@@ -5,3 +5,6 @@ dist/
 *.log
 .DS_Store
 *.tsbuildinfo
+
+# Local whatsmeow SQLite sessions (production uses Postgres WHATSAPP_STORE_URL)
+apps/api/data/

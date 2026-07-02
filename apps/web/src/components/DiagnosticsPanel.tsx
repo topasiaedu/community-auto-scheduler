@@ -31,7 +31,7 @@ export function DiagnosticsPanel({ vm }: DiagnosticsPanelProps): ReactElement | 
               <strong>Queue:</strong> <code>{health.queue}</code>
             </p>
             <p>
-              <strong>Session path example:</strong> <code>{health.sessionPathExample}</code>
+              <strong>WhatsApp store example:</strong> <code>{health.whatsappStoreExample}</code>
             </p>
           </>
         )}

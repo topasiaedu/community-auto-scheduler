@@ -11,7 +11,7 @@
   },
   "scripts": {
     "dev": "concurrently --kill-others-on-fail -n api,web -c blue,green \"npm run dev -w @nmcas/api\" \"npm run dev -w @nmcas/web\"",
-    "build:packages": "npm run build -w @nmcas/db && npm run build -w @nmcas/wa-session-storage",
+    "build:packages": "npm run build -w @nmcas/db",
     "build:api": "npm run build:packages && npm run build -w @nmcas/api",
     "build:web": "npm run build -w @nmcas/web",
     "typecheck": "npm run typecheck --workspaces --if-present",

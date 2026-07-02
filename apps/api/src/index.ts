@@ -1,5 +1,5 @@
 /**
- * NMCAS API entry: Fastify HTTP server, Prisma, pg-boss worker, and Baileys (per-project pool).
+ * NMCAS API entry: Fastify HTTP server, Prisma, pg-boss worker, and whatsmeow-node (per-project pool).
  */
 
 import { loadEnvFiles } from "./load-env.js";
@@ -8,7 +8,6 @@ import cors from "@fastify/cors";
 import Fastify from "fastify";
 import PgBoss from "pg-boss";
 import { createPrismaClient, type PrismaClient } from "@nmcas/db";
-import { getSessionStoragePrefix } from "@nmcas/wa-session-storage";
 import {
   createRequireAuthPreHandler,
   createRequireProjectAccessPreHandler,
@@ -23,11 +22,13 @@ import { SEND_SCHEDULED_MESSAGE_QUEUE } from "./queues.js";
 import { handleSendScheduledMessageJobs } from "./worker/send-scheduled-message.js";
 import { startRescueSweep } from "./rescue-sweep.js";
 import { WaConnectionPool } from "./wa/wa-pool.js";
+import { assertWhatsAppStoreConfig, whatsappSchemaName } from "./wa/whatsapp-store.js";
 
 async function main(): Promise<void> {
   const env = loadApiEnv();
+  assertWhatsAppStoreConfig(env);
   const prisma: PrismaClient = createPrismaClient();
-  const waPool = new WaConnectionPool(env);
+  const waPool = new WaConnectionPool(env, prisma);
 
   /**
    * Append keepalive params to pg-boss's connection string so its internal `pg` pool
@@ -104,7 +105,7 @@ async function main(): Promise<void> {
   fastify.get("/health", async () => ({
     ok: true as const,
     queue: SEND_SCHEDULED_MESSAGE_QUEUE,
-    sessionPathExample: getSessionStoragePrefix(env.DEFAULT_PROJECT_ID),
+    whatsappStoreExample: whatsappSchemaName(env.DEFAULT_PROJECT_ID),
   }));
 
   fastify.get("/ready", async () => {

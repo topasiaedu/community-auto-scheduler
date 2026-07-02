@@ -1,4 +1,4 @@
-# NMCAS API — monorepo build (Fastify + Prisma + Baileys + pg-boss).
+# NMCAS API — monorepo build (Fastify + Prisma + whatsmeow-node + pg-boss).
 # Intended for Render Docker, Fly.io, etc. Free tiers may sleep; scheduling needs an always-on plan in production.
 
 FROM node:20-bookworm-slim AS base

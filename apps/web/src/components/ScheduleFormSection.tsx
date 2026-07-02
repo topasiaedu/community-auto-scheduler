@@ -139,9 +139,7 @@ export function ScheduleFormSection({ vm }: ScheduleFormSectionProps): ReactElem
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground leading-snug">
-              When WhatsApp links a group to a Community, we show{" "}
-              <span className="font-medium">community name › group name</span> (from your account&apos;s
-              metadata).{" "}
+              Groups are listed by their WhatsApp name.{" "}
               {groupDuplicateNames.size > 0 ? (
                 <>
                   If two lines still look the same, the <span className="font-mono">· …12345678</span>{" "}

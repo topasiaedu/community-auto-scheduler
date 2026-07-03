@@ -7,7 +7,10 @@ export const MIN_LEAD_SECONDS = 15;
 export type HealthResponse = {
   ok: boolean;
   queue: string;
-  whatsappStoreExample: string;
+  /** whatsmeow-node deploy */
+  whatsappStoreExample?: string;
+  /** legacy Baileys deploy */
+  sessionPathExample?: string;
 };
 
 export type WaStatusResponse = {

@@ -5,7 +5,6 @@
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { toast } from "sonner";
-import QRCode from "qrcode";
 import type { Session } from "@supabase/supabase-js";
 import { isUtcIsoAtLeastSecondsAhead, mytLocalToUtcIso, utcIsoToDatetimeLocalMyt } from "../myt.js";
 import { getBrowserSupabase } from "../supabase-client.js";
@@ -53,7 +52,8 @@ export function useNmcasApp() {
 
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [waState, setWaState] = useState<WaStatusResponse | null>(null);
-  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  /** Raw WhatsApp multi-device QR payload from `GET /wa/qr` (rendered as SVG in the UI). */
+  const [qrPayload, setQrPayload] = useState<string | null>(null);
   const [groups, setGroups] = useState<WaGroup[]>([]);
   const [messages, setMessages] = useState<ScheduledMessage[]>([]);
   const [formError, setFormError] = useState<string | null>(null);
@@ -305,24 +305,27 @@ export function useNmcasApp() {
 
   const refreshQrFromServer = useCallback(async () => {
     if (session === null || selectedProjectId.length === 0) {
-      setQrDataUrl(null);
+      setQrPayload(null);
       return;
     }
-    const res = await authorizedFetch("/wa/qr");
-    if (res.status === 204) {
-      setQrDataUrl(null);
-      return;
-    }
-    if (!res.ok) {
-      setQrDataUrl(null);
-      return;
-    }
-    const body = (await res.json()) as { qr?: string };
-    if (typeof body.qr === "string" && body.qr.length > 0) {
-      const url = await QRCode.toDataURL(body.qr, { margin: 1, width: 280 });
-      setQrDataUrl(url);
-    } else {
-      setQrDataUrl(null);
+    try {
+      const res = await authorizedFetch("/wa/qr");
+      if (res.status === 204) {
+        setQrPayload(null);
+        return;
+      }
+      if (!res.ok) {
+        setQrPayload(null);
+        return;
+      }
+      const body = (await res.json()) as { qr?: string };
+      if (typeof body.qr === "string" && body.qr.length > 0) {
+        setQrPayload(body.qr);
+      } else {
+        setQrPayload(null);
+      }
+    } catch {
+      setQrPayload(null);
     }
   }, [authorizedFetch, session, selectedProjectId]);
 
@@ -481,15 +484,18 @@ export function useNmcasApp() {
   }, [refreshWa, waState?.state]);
 
   useEffect(() => {
-    void refreshQrFromServer();
     if (waState?.state === "connected") {
+      setQrPayload(null);
       return undefined;
     }
+    void refreshQrFromServer();
+    const pollMs =
+      waState?.hasQr === true && qrPayload === null ? 1000 : 3000;
     const t = window.setInterval(() => {
       void refreshQrFromServer();
-    }, 3000);
+    }, pollMs);
     return () => window.clearInterval(t);
-  }, [refreshQrFromServer, waState?.state]);
+  }, [refreshQrFromServer, waState?.state, waState?.hasQr, qrPayload]);
 
   useEffect(() => {
     if (waState?.state === "connected") {
@@ -945,7 +951,7 @@ export function useNmcasApp() {
     health,
     refreshHealth,
     waState,
-    qrDataUrl,
+    qrPayload,
     groups,
     messages,
     formError,

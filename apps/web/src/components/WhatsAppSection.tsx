@@ -4,6 +4,7 @@
  */
 
 import type { ReactElement } from "react";
+import { QRCodeSVG } from "qrcode.react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -22,7 +23,7 @@ export function WhatsAppSection({ vm }: WhatsAppSectionProps): ReactElement | nu
     showLinkHelp,
     waConnecting,
     waState,
-    qrDataUrl,
+    qrPayload,
     groups,
     refreshHealth,
     refreshWa,
@@ -121,14 +122,16 @@ export function WhatsAppSection({ vm }: WhatsAppSectionProps): ReactElement | nu
 
             {/* QR column */}
             <div className="flex items-start justify-center md:justify-end">
-              {qrDataUrl !== null ? (
+              {qrPayload !== null ? (
                 <figure className="flex flex-col items-center gap-2 m-0">
-                  <img
-                    src={qrDataUrl}
-                    alt="WhatsApp link QR code"
-                    width={220}
-                    height={220}
-                    className="rounded-lg border border-border"
+                  <QRCodeSVG
+                    value={qrPayload}
+                    size={220}
+                    level="M"
+                    marginSize={1}
+                    className="rounded-lg border border-border bg-white p-1"
+                    role="img"
+                    aria-label="WhatsApp link QR code"
                   />
                   <figcaption className="text-xs text-muted-foreground">
                     Scan with WhatsApp → Linked devices

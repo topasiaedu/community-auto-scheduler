@@ -1,5 +1,5 @@
 /**
- * One whatsmeow-node client per `projectId` (Postgres schema or SQLite file per project).
+ * One whatsmeow-node client per `projectId` (SQLite file hydrated from Postgres blob).
  * A `WaConnectionPool` owns one `WaManager` per project in the API process.
  */
 
@@ -8,10 +8,8 @@ import type { PrismaClient } from "@nmcas/db";
 import type { ApiEnv } from "../env.js";
 import { sendGroupImage, sendGroupPoll, sendGroupText, withTempImageFile } from "./wa-send.js";
 import {
-  ensurePostgresWhatsAppSchema,
-  ensureSqliteStoreDir,
-  isPostgresStoreUrl,
-  resolveWhatsAppStoreBase,
+  hydrateWhatsAppSessionFromBlob,
+  persistWhatsAppSessionToBlob,
   resolveWhatsAppStoreUri,
   WHATSAPP_COMMAND_TIMEOUT_MS,
   wipeWhatsAppStore,
@@ -30,10 +28,6 @@ export type WaGroupOption = {
   label: string;
 };
 
-function isPostgresStore(env: ApiEnv): boolean {
-  return isPostgresStoreUrl(resolveWhatsAppStoreBase(env));
-}
-
 export class WaManager {
   private readonly env: ApiEnv;
 
@@ -51,14 +45,18 @@ export class WaManager {
   /** Serialized boot / reset / shutdown operations. */
   private waOpChain: Promise<void> = Promise.resolve();
 
-  /** Cached group picker options; community detection is expensive so results are reused. */
+  /** Cached group picker options. */
   private groupCache: { fetchedAt: number; options: WaGroupOption[] } | undefined;
 
-  /** De-duplicates concurrent group fetches (the UI polls `/wa/groups` repeatedly). */
+  /** De-duplicates concurrent group fetches. */
   private groupFetchInFlight: Promise<WaGroupOption[]> | undefined;
 
-  /** How long a successful group fetch is reused before refetching. */
+  /** Periodic blob upload while linked (session keys rotate). */
+  private persistTimer: ReturnType<typeof setInterval> | undefined;
+
   private static readonly GROUP_CACHE_TTL_MS = 5 * 60_000;
+
+  private static readonly PERSIST_INTERVAL_MS = 60_000;
 
   constructor(env: ApiEnv, prisma: PrismaClient, projectId: string) {
     const trimmed = projectId.trim();
@@ -108,10 +106,6 @@ export class WaManager {
 
   /**
    * Groups the linked account participates in (for schedule UI picker).
-   *
-   * Results are cached (TTL) and concurrent calls are de-duplicated because community detection
-   * issues one `getSubGroups` call per joined group; without this the repeated `/wa/groups` polls
-   * stack up multi-second fetches. Pass `forceRefresh` (the "Load groups" button) to bypass cache.
    */
   async fetchGroupOptions(forceRefresh = false): Promise<WaGroupOption[]> {
     const cached = this.groupCache;
@@ -145,9 +139,6 @@ export class WaManager {
       return [];
     }
     try {
-      // Single IPC call only. We deliberately do NOT call `getSubGroups` per group for community
-      // labels: the whatsmeow Go subprocess processes IPC commands serially, so per-group lookups
-      // both take ~75s for large accounts and would block scheduled sends queued behind them.
       const startedAt = Date.now();
       const groups = await client.getJoinedGroups();
       console.info(
@@ -217,6 +208,7 @@ export class WaManager {
   async shutdown(): Promise<void> {
     this.waOpChain = this.waOpChain
       .then(async () => {
+        this.stopPersistTimer();
         const client = this.client;
         this.client = undefined;
         this.uiState = "disconnected";
@@ -229,7 +221,9 @@ export class WaManager {
             /* ignore */
           }
           client.close();
+          await sleep(300);
         }
+        await this.safePersist();
       })
       .catch((err: unknown) => {
         console.error("[WaManager] shutdown failed:", err);
@@ -251,6 +245,7 @@ export class WaManager {
   }
 
   private async performResetSessionForLinking(): Promise<void> {
+    this.stopPersistTimer();
     const existing = this.client;
     this.client = undefined;
     this.latestQr = undefined;
@@ -268,10 +263,7 @@ export class WaManager {
         /* may already be logged out */
       }
       existing.close();
-      // Let the Go subprocess release SQLite handles before we delete session files (Windows EBUSY).
-      await new Promise<void>((resolve) => {
-        setTimeout(resolve, 500);
-      });
+      await sleep(500);
     }
     await wipeWhatsAppStore(this.prisma, this.env, this.projectId);
     await this.ensureRunning();
@@ -290,6 +282,10 @@ export class WaManager {
           await existing.connect();
           const ok = await existing.waitForConnection(30_000);
           this.uiState = ok ? "connected" : "connecting";
+          if (ok) {
+            this.startPersistTimer();
+            await this.safePersist();
+          }
           return;
         }
       } catch {
@@ -315,6 +311,8 @@ export class WaManager {
     client.on("connected", () => {
       this.uiState = "connected";
       this.latestQr = undefined;
+      this.startPersistTimer();
+      void this.safePersistAfterDelay(1500);
     });
 
     client.on("disconnected", () => {
@@ -326,6 +324,10 @@ export class WaManager {
     client.on("logged_out", () => {
       this.uiState = "disconnected";
       this.latestQr = undefined;
+      this.stopPersistTimer();
+      void wipeWhatsAppStore(this.prisma, this.env, this.projectId).catch((err: unknown) => {
+        console.error(`[WaManager] wipe after logout failed projectId=${this.projectId}:`, err);
+      });
     });
 
     client.on("error", (err: Error) => {
@@ -342,12 +344,9 @@ export class WaManager {
 
   private async boot(): Promise<void> {
     this.uiState = "connecting";
+    this.stopPersistTimer();
 
-    if (isPostgresStore(this.env)) {
-      await ensurePostgresWhatsAppSchema(this.prisma, this.projectId);
-    } else {
-      await ensureSqliteStoreDir(this.env, this.projectId);
-    }
+    await hydrateWhatsAppSessionFromBlob(this.prisma, this.env, this.projectId);
 
     const store = resolveWhatsAppStoreUri(this.env, this.projectId);
     const client = createClient({
@@ -366,10 +365,10 @@ export class WaManager {
       console.info(
         `[WaManager] boot projectId=${this.projectId} storedSession=true connected=${String(connectedOk)} loggedIn=${String(loggedIn)}`,
       );
-      // Only report "connected" when the device is actually logged in. A stale stored session can
-      // connect at the websocket level (false green) while real queries (groups/sends) hang.
       if (loggedIn) {
         this.uiState = "connected";
+        this.startPersistTimer();
+        await this.safePersist();
         return;
       }
       console.warn(
@@ -385,10 +384,41 @@ export class WaManager {
       } catch {
         /* ignore */
       }
+      await wipeWhatsAppStore(this.prisma, this.env, this.projectId);
     }
 
     await client.getQRChannel();
     await client.connect();
+  }
+
+  private startPersistTimer(): void {
+    if (this.persistTimer !== undefined) {
+      return;
+    }
+    this.persistTimer = setInterval(() => {
+      void this.safePersist();
+    }, WaManager.PERSIST_INTERVAL_MS);
+    this.persistTimer.unref?.();
+  }
+
+  private stopPersistTimer(): void {
+    if (this.persistTimer !== undefined) {
+      clearInterval(this.persistTimer);
+      this.persistTimer = undefined;
+    }
+  }
+
+  private async safePersist(): Promise<void> {
+    try {
+      await persistWhatsAppSessionToBlob(this.prisma, this.env, this.projectId);
+    } catch (err: unknown) {
+      console.error(`[WaManager] persist session failed projectId=${this.projectId}:`, err);
+    }
+  }
+
+  private async safePersistAfterDelay(ms: number): Promise<void> {
+    await sleep(ms);
+    await this.safePersist();
   }
 
   /** `isLoggedIn` that never throws (defaults to false) so boot can fall back to QR linking. */
@@ -399,4 +429,10 @@ export class WaManager {
       return false;
     }
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }

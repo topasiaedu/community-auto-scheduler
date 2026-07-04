@@ -95,3 +95,11 @@ model UserProjectPreference {
   @@unique([userId, projectId])
   @@index([userId])
 }
+
+/// Per-project whatsmeow SQLite session (bytea). whatsmeow runs against a local file; we
+/// hydrate/persist this row so sessions survive deploys without direct Postgres / search_path.
+model WhatsAppSessionBlob {
+  projectId String   @id
+  data      Bytes
+  updatedAt DateTime @updatedAt
+}

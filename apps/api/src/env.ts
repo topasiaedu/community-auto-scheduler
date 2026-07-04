@@ -14,10 +14,9 @@ const EnvSchema = z.object({
   SUPABASE_ANON_KEY: z.string().min(1, "SUPABASE_ANON_KEY is required for JWT verification"),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1, "SUPABASE_SERVICE_ROLE_KEY is required for Storage"),
   /**
-   * whatsmeow session store (per-project schema `wa_<projectId>`).
-   * On Render use the same Supabase **session** pooler URL as `DATABASE_URL` (port 5432) —
-   * direct `db.<ref>.supabase.co` is often IPv6-only and unreachable from Render.
-   * Local-only fallback: SQLite directory (e.g. `file:./data/wa-sessions`).
+   * Optional local SQLite directory for whatsmeow (`file:./data/wa-sessions`).
+   * Sessions are also persisted to Postgres (`WhatsAppSessionBlob`) via `DATABASE_URL`
+   * so Render survives deploys without direct Postgres / search_path.
    */
   WHATSAPP_STORE_URL: z.string().min(1).optional(),
   NMCAS_POST_MEDIA_BUCKET: z.string().min(1, "NMCAS_POST_MEDIA_BUCKET is required for post images"),

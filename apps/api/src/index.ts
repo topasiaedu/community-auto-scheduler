@@ -22,7 +22,7 @@ import { SEND_SCHEDULED_MESSAGE_QUEUE } from "./queues.js";
 import { handleSendScheduledMessageJobs } from "./worker/send-scheduled-message.js";
 import { startRescueSweep } from "./rescue-sweep.js";
 import { WaConnectionPool } from "./wa/wa-pool.js";
-import { assertWhatsAppStoreConfig, whatsappSchemaName } from "./wa/whatsapp-store.js";
+import { assertWhatsAppStoreConfig, whatsappStoreExample } from "./wa/whatsapp-store.js";
 
 async function main(): Promise<void> {
   const env = loadApiEnv();
@@ -105,7 +105,7 @@ async function main(): Promise<void> {
   fastify.get("/health", async () => ({
     ok: true as const,
     queue: SEND_SCHEDULED_MESSAGE_QUEUE,
-    whatsappStoreExample: whatsappSchemaName(env.DEFAULT_PROJECT_ID),
+    whatsappStoreExample: whatsappStoreExample(env.DEFAULT_PROJECT_ID),
   }));
 
   fastify.get("/ready", async () => {

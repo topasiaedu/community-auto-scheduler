@@ -44,7 +44,7 @@ Internal monorepo for **NMCAS** — compose, schedule, and auto-send WhatsApp me
    npm run db:seed
    ```
 
-6. **Supabase Storage:** ensure a **private** bucket exists for scheduled post images: **`NMCAS_POST_MEDIA_BUCKET`**. WhatsApp sessions are stored in **Supabase Postgres** (per-project schema `wa_<projectId>`), not Storage. Set **`WHATSAPP_STORE_URL`** to the **direct** Postgres URI (`db.<ref>.supabase.co:5432`) so local and deployed API share the same WA session; keep **`DATABASE_URL`** on the session pooler for pg-boss + Prisma.
+6. **Supabase Storage:** ensure a **private** bucket exists for scheduled post images: **`NMCAS_POST_MEDIA_BUCKET`**. WhatsApp sessions use **local SQLite** files, persisted to Postgres table **`WhatsAppSessionBlob`** via **`DATABASE_URL`** (session pooler is fine). Optional local override: **`WHATSAPP_STORE_URL=file:./data/wa-sessions`**.
 
 ### Prisma and poolers
 
@@ -66,9 +66,7 @@ npm run dev
 
 **Auth (production-shaped):** the API expects **`Authorization: Bearer`** (Supabase session JWT) and **`X-Project-Id`** on scoped routes. Set **`SUPABASE_ANON_KEY`** on the API and **`VITE_SUPABASE_URL`** / **`VITE_SUPABASE_ANON_KEY`** for the web app (see [`.env.example`](.env.example)). The web UI signs in with Supabase; **`GET /projects`** lists **all** projects; **`POST /projects`** creates a project. There is **no per-user project ACL** — anyone who can sign in to your Supabase Auth project can use any NMCAS project; keep sign-up restricted if that matters.
 
-**Supabase Storage `fetch failed` on post media:** the API machine cannot reach your Supabase project over HTTPS (wrong `SUPABASE_URL`, VPN/firewall/DNS, project paused, or a short network blip). Until connectivity is fixed, scheduled posts with images may fail. WhatsApp session state lives in Postgres, not Storage.
-
-**WhatsApp QR / `WHATSAPP_STORE_URL` on Windows:** the direct Postgres host (`db.<ref>.supabase.co`) is often **IPv6-only**. If local dev cannot resolve or reach it (`ENOTFOUND` / `ENETUNREACH`), enable Supabase’s **IPv4 add-on** and put that URI in `WHATSAPP_STORE_URL`, or use `file:./data/wa-sessions` locally only (session will not match Render until IPv4 direct works).
+**Supabase Storage `fetch failed` on post media:** the API machine cannot reach your Supabase project over HTTPS (wrong `SUPABASE_URL`, VPN/firewall/DNS, project paused, or a short network blip). Until connectivity is fixed, scheduled posts with images may fail. WhatsApp session state lives in SQLite + `WhatsAppSessionBlob`, not Storage.
 
 **WhatsApp status flashing:** after migration to whatsmeow-node, only one API process should use each project's session. Close duplicate `npm run dev` instances and extra WhatsApp Web sessions for the same number.
 

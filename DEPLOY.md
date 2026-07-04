@@ -5,7 +5,7 @@ Hosting matches [`NMCAS-VAULT/wiki/overview.md`](NMCAS-VAULT/wiki/overview.md): 
 ## Prerequisites
 
 - GitHub repo connected to both platforms.
-- **Supabase** project: session pooler for `DATABASE_URL`, **direct** Postgres for `WHATSAPP_STORE_URL`, Storage buckets, Auth keys.
+- **Supabase** project: session pooler for `DATABASE_URL` and `WHATSAPP_STORE_URL`, Storage buckets, Auth keys.
 - **Do not** commit `.env`; configure variables in each platform’s dashboard.
 
 ---
@@ -36,7 +36,7 @@ Render sets **`PORT`**; the API already listens on `process.env.PORT`.
 | Variable | Notes |
 |----------|--------|
 | `DATABASE_URL` | Supabase Postgres **session pooler** (`:5432`, host `*.pooler.supabase.com`) for Prisma + pg-boss. |
-| `WHATSAPP_STORE_URL` | **Required** when `DATABASE_URL` is the pooler. Supabase **direct** Postgres (`db.<ref>.supabase.co:5432`) for whatsmeow sessions (shared local + Render). |
+| `WHATSAPP_STORE_URL` | Same **session pooler** URL as `DATABASE_URL` (port **5432**). Direct `db.<ref>.supabase.co` is often IPv6-only and fails on Render with `network is unreachable`. Do **not** use transaction pooler (`:6543`). |
 | `PORT` | Usually injected by Render; only set manually if your dashboard requires it. |
 | `WEB_ORIGIN` | Your Vercel origins, comma-separated, e.g. `https://your-app.vercel.app`. |
 | `DEFAULT_PROJECT_ID` | Default `nmcas-default-project` if you use seed. |

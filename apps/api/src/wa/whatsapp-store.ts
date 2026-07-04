@@ -38,12 +38,27 @@ export function isPostgresStoreUrl(url: string): boolean {
 }
 
 /**
- * True when the URL targets Supabase Supavisor (pooler). whatsmeow needs a direct Postgres
- * connection because the pooler does not reliably pass per-connection `search_path` options.
+ * True when the URL targets Supabase Supavisor (pooler).
  */
 export function isSupabasePoolerUrl(url: string): boolean {
   try {
     return new URL(url).hostname.includes("pooler.supabase.com");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * True for Supabase **transaction** pooler (port 6543). Session state such as `search_path`
+ * is not reliable there; use session mode (`:5432`) or direct Postgres instead.
+ */
+export function isSupabaseTransactionPoolerUrl(url: string): boolean {
+  if (!isSupabasePoolerUrl(url)) {
+    return false;
+  }
+  try {
+    const port = new URL(url).port;
+    return port === "6543";
   } catch {
     return false;
   }
@@ -58,22 +73,21 @@ export function resolveWhatsAppStoreBase(env: ApiEnv): string {
 
 /**
  * Validates WhatsApp store configuration at API startup.
+ *
+ * Prefer Supabase **session** pooler (`*.pooler.supabase.com:5432`) on Render: direct
+ * `db.<ref>.supabase.co` is often IPv6-only and returns "network is unreachable" on IPv4 hosts.
+ * Transaction pooler (`:6543`) is rejected because per-schema `search_path` is unreliable.
  */
 export function assertWhatsAppStoreConfig(env: ApiEnv): void {
   const storeBase = resolveWhatsAppStoreBase(env);
   if (!isPostgresStoreUrl(storeBase)) {
     return;
   }
-  if (isSupabasePoolerUrl(storeBase)) {
+  if (isSupabaseTransactionPoolerUrl(storeBase)) {
     throw new Error(
-      "WHATSAPP_STORE_URL must use Supabase direct Postgres (db.<ref>.supabase.co:5432), " +
-        "not the pooler — Supavisor does not reliably pass whatsmeow's per-schema search_path option.",
-    );
-  }
-  if (env.WHATSAPP_STORE_URL === undefined && isSupabasePoolerUrl(env.DATABASE_URL)) {
-    throw new Error(
-      "DATABASE_URL uses the Supabase pooler; set WHATSAPP_STORE_URL to the direct Postgres " +
-        "connection (Supabase → Settings → Database → Connection string → URI).",
+      "WHATSAPP_STORE_URL must not use the Supabase transaction pooler (port 6543). " +
+        "Use session mode (port 5432 on *.pooler.supabase.com) — same style as DATABASE_URL — " +
+        "or direct Postgres if your host has IPv6 / Supabase IPv4 add-on.",
     );
   }
 }

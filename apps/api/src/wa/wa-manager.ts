@@ -3,7 +3,11 @@
  * A `WaConnectionPool` owns one `WaManager` per project in the API process.
  */
 
-import { createClient, type WhatsmeowClient } from "@whatsmeow-node/whatsmeow-node";
+import {
+  createClient,
+  type GroupInfo,
+  type WhatsmeowClient,
+} from "@whatsmeow-node/whatsmeow-node";
 import type { PrismaClient } from "@nmcas/db";
 import type { ApiEnv } from "../env.js";
 import { sendGroupImage, sendGroupPoll, sendGroupText, withTempImageFile } from "./wa-send.js";
@@ -22,11 +26,77 @@ export type WaGroupOption = {
   /** Raw WhatsApp group title. */
   name: string;
   /**
-   * Human-readable row for the picker. Currently the group subject (best-effort): whatsmeow's
-   * serial IPC makes per-group community lookups too slow and they would block sends.
+   * Human-readable row for the picker, e.g. `RDW 4.0 › Announcements`.
    */
   label: string;
+  /** Community display name when this chat is a community subgroup. */
+  communityName?: string;
+  /** Channel / subgroup name within the community (e.g. `Announcements`). */
+  channelName?: string;
+  /** True when WhatsApp marks the group as announcement-only. */
+  isAnnounce?: boolean;
 };
+
+type CommunityChildMeta = {
+  communityName: string;
+  channelName: string;
+  isDefaultSub: boolean;
+};
+
+/**
+ * Builds picker fields from joined-group metadata and optional community child map.
+ */
+function buildWaGroupOption(g: GroupInfo, childMeta: CommunityChildMeta | undefined): WaGroupOption {
+  const nameRaw = typeof g.name === "string" ? g.name.trim() : "";
+  const name = nameRaw.length > 0 ? nameRaw : "";
+  const isAnnounce = g.announce === true;
+
+  if (childMeta !== undefined) {
+    const channelName =
+      childMeta.channelName.length > 0
+        ? childMeta.channelName
+        : isAnnounce || childMeta.isDefaultSub
+          ? "Announcements"
+          : name.length > 0
+            ? name
+            : "Group";
+    const communityName =
+      childMeta.communityName.length > 0
+        ? childMeta.communityName
+        : name.length > 0
+          ? name
+          : "Community";
+    return {
+      jid: g.jid,
+      name,
+      communityName,
+      channelName,
+      isAnnounce: isAnnounce || childMeta.isDefaultSub,
+      label: `${communityName} › ${channelName}`,
+    };
+  }
+
+  if (isAnnounce) {
+    const channelName = "Announcements";
+    const communityName =
+      name.length > 0 && name.toLowerCase() !== "announcements" ? name : "Community";
+    const label =
+      name.length > 0 && name.toLowerCase() !== "announcements"
+        ? `${name} › ${channelName}`
+        : channelName;
+    return {
+      jid: g.jid,
+      name,
+      communityName,
+      channelName,
+      isAnnounce: true,
+      label,
+    };
+  }
+
+  const label = name.length > 0 ? name : "(unnamed group)";
+  return { jid: g.jid, name, label, isAnnounce: false };
+}
 
 export class WaManager {
   private readonly env: ApiEnv;
@@ -145,15 +215,16 @@ export class WaManager {
         `[WaManager] getJoinedGroups projectId=${this.projectId} count=${String(groups.length)} elapsedMs=${String(Date.now() - startedAt)}`,
       );
 
+      const joined = groups.filter((g) => g.jid.endsWith("@g.us"));
+      const { parentJids, childMetaByJid } = await this.resolveCommunityLinks(client, joined);
+
       const out: WaGroupOption[] = [];
-      for (const g of groups) {
-        if (!g.jid.endsWith("@g.us")) {
+      for (const g of joined) {
+        if (parentJids.has(g.jid)) {
+          // Community shells are not postable targets in WhatsApp.
           continue;
         }
-        const nameRaw = typeof g.name === "string" ? g.name.trim() : "";
-        const name = nameRaw.length > 0 ? nameRaw : "";
-        const label = name.length > 0 ? name : "(unnamed group)";
-        out.push({ jid: g.jid, name, label });
+        out.push(buildWaGroupOption(g, childMetaByJid.get(g.jid)));
       }
 
       out.sort((a, b) => {
@@ -161,10 +232,92 @@ export class WaManager {
         return byLabel !== 0 ? byLabel : a.jid.localeCompare(b.jid);
       });
       this.groupCache = { fetchedAt: Date.now(), options: out };
+      console.info(
+        `[WaManager] group picker projectId=${this.projectId} options=${String(out.length)} communities=${String(parentJids.size)} elapsedMs=${String(Date.now() - startedAt)}`,
+      );
       return out;
     } catch {
       return [];
     }
+  }
+
+  /**
+   * Maps community parents → children via `getSubGroups`, only for likely parents
+   * (non-announce groups whose subject is shared with another joined group). Full N+1 on
+   * every group is too slow and blocks the serial Go IPC used for sends.
+   */
+  private async resolveCommunityLinks(
+    client: WhatsmeowClient,
+    joined: GroupInfo[],
+  ): Promise<{
+    parentJids: Set<string>;
+    childMetaByJid: Map<string, CommunityChildMeta>;
+  }> {
+    const parentJids = new Set<string>();
+    const childMetaByJid = new Map<string, CommunityChildMeta>();
+
+    const byName = new Map<string, GroupInfo[]>();
+    for (const g of joined) {
+      const key = typeof g.name === "string" ? g.name.trim().toLowerCase() : "";
+      const list = byName.get(key);
+      if (list === undefined) {
+        byName.set(key, [g]);
+      } else {
+        list.push(g);
+      }
+    }
+
+    const parentCandidates: GroupInfo[] = [];
+    for (const g of joined) {
+      if (g.announce) {
+        continue;
+      }
+      const key = typeof g.name === "string" ? g.name.trim().toLowerCase() : "";
+      const siblings = byName.get(key) ?? [g];
+      const nameShared = siblings.length > 1;
+      const sharesNameWithAnnounce = siblings.some((s) => s.announce && s.jid !== g.jid);
+      if (nameShared || sharesNameWithAnnounce) {
+        parentCandidates.push(g);
+      }
+    }
+
+    for (const parent of parentCandidates) {
+      try {
+        const subs = await client.getSubGroups(parent.jid);
+        if (subs.length === 0) {
+          continue;
+        }
+        parentJids.add(parent.jid);
+        const communityName =
+          typeof parent.name === "string" && parent.name.trim().length > 0
+            ? parent.name.trim()
+            : "Community";
+        for (const sub of subs) {
+          if (!sub.jid.endsWith("@g.us") || sub.jid === parent.jid) {
+            continue;
+          }
+          const channelRaw = typeof sub.name === "string" ? sub.name.trim() : "";
+          const channelName =
+            channelRaw.length > 0
+              ? channelRaw
+              : sub.isDefaultSub
+                ? "Announcements"
+                : "Group";
+          childMetaByJid.set(sub.jid, {
+            communityName,
+            channelName,
+            isDefaultSub: sub.isDefaultSub === true,
+          });
+        }
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.warn(
+          `[WaManager] getSubGroups failed projectId=${this.projectId} jid=${parent.jid}: ${message}`,
+        );
+      }
+    }
+
+    return { parentJids, childMetaByJid };
   }
 
   async sendPost(groupJid: string, text: string, imageBuffer: Buffer | undefined, mimetype: string): Promise<void> {

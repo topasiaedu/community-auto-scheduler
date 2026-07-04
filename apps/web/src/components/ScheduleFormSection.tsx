@@ -4,7 +4,7 @@
  * Uses shadcn Button, Select, Textarea, Input, Label, Badge.
  */
 
-import type { ReactElement } from "react";
+import { useMemo, useState, type ReactElement } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -21,7 +21,12 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { formatWaGroupPickerLabel } from "../lib/format.js";
+import {
+  formatWaGroupPickerLabel,
+  waGroupChannelLabel,
+  waGroupCommunityKey,
+  waGroupCommunityLabel,
+} from "../lib/format.js";
 import { ImageDropZone } from "./ImageDropZone.js";
 import type { NmcasViewModel } from "../hooks/useNmcasApp.js";
 import type { MessageKind } from "../types/models.js";
@@ -45,7 +50,6 @@ export function ScheduleFormSection({ vm }: ScheduleFormSectionProps): ReactElem
     setMessageKind,
     groupJid,
     groups,
-    groupDuplicateNames,
     copyText,
     setCopyText,
     imagePath,
@@ -72,6 +76,69 @@ export function ScheduleFormSection({ vm }: ScheduleFormSectionProps): ReactElem
 
   const isEditing = editingDraftId !== null;
   const charLimitReached = copyText.length >= POST_CHAR_LIMIT * 0.9;
+
+  /** Keeps community selection when the channel dropdown was cleared. */
+  const [communityKeyOverride, setCommunityKeyOverride] = useState("");
+
+  const selectedCommunityKey = useMemo(() => {
+    const selected = groups.find((g) => g.jid === groupJid);
+    if (selected !== undefined) {
+      return waGroupCommunityKey(selected);
+    }
+    return communityKeyOverride;
+  }, [groups, groupJid, communityKeyOverride]);
+
+  const communityOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const g of groups) {
+      const key = waGroupCommunityKey(g);
+      if (!map.has(key)) {
+        map.set(key, waGroupCommunityLabel(g));
+      }
+    }
+    return [...map.entries()]
+      .map(([key, label]) => ({ key, label }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [groups]);
+
+  const channelOptions = useMemo(() => {
+    if (selectedCommunityKey.length === 0) {
+      return [];
+    }
+    return groups
+      .filter((g) => waGroupCommunityKey(g) === selectedCommunityKey)
+      .sort((a, b) => waGroupChannelLabel(a).localeCompare(waGroupChannelLabel(b)));
+  }, [groups, selectedCommunityKey]);
+
+  const channelDuplicateNames = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const g of channelOptions) {
+      const key = waGroupChannelLabel(g);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    const duplicate = new Set<string>();
+    for (const [k, c] of counts) {
+      if (c > 1) {
+        duplicate.add(k);
+      }
+    }
+    return duplicate;
+  }, [channelOptions]);
+
+  const onCommunityChange = (key: string): void => {
+    setCommunityKeyOverride(key);
+    const channels = groups.filter((g) => waGroupCommunityKey(g) === key);
+    if (channels.length === 1) {
+      const only = channels[0];
+      if (only !== undefined) {
+        onGroupSelect(only.jid);
+      }
+      return;
+    }
+    if (!channels.some((g) => g.jid === groupJid)) {
+      onGroupSelect("");
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -106,47 +173,97 @@ export function ScheduleFormSection({ vm }: ScheduleFormSectionProps): ReactElem
 
       {/* ── Single unified compose card ── */}
       <div className="rounded-xl border border-border bg-card shadow-sm">
-        {/* Section: Group + Type */}
-        <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-end">
-          <div className="flex-1 space-y-1.5">
-            <Label htmlFor="group-select" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Group
-            </Label>
-            <Select
-              value={groupJid}
-              onValueChange={(v) => {
-                onGroupSelect(v);
-                setFormError(null);
-              }}
-            >
-              <SelectTrigger id="group-select" className="h-10">
-                <SelectValue placeholder="Select a WhatsApp group…" />
-              </SelectTrigger>
-              <SelectContent>
-                {groups.length === 0 ? (
-                  <div className="px-3 py-2 text-sm text-muted-foreground">
-                    {waConnected
-                      ? "No groups yet — go to Connect and load groups."
-                      : "Connect WhatsApp first."}
-                  </div>
-                ) : (
-                  groups.map((g) => (
-                    <SelectItem key={g.jid} value={g.jid} title={g.jid}>
-                      {formatWaGroupPickerLabel(g, groupDuplicateNames)}
-                    </SelectItem>
-                  ))
-                )}
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground leading-snug">
-              Groups are listed by their WhatsApp name.{" "}
-              {groupDuplicateNames.size > 0 ? (
-                <>
-                  If two lines still look the same, the <span className="font-mono">· …12345678</span>{" "}
-                  suffix is the unique group id.
-                </>
-              ) : null}
-            </p>
+        {/* Section: Community + channel/group + Type */}
+        <div className="flex flex-col gap-4 p-5 lg:flex-row lg:items-end">
+          <div className="flex min-w-0 flex-1 flex-col gap-4 sm:flex-row">
+            <div className="min-w-0 flex-1 space-y-1.5">
+              <Label
+                htmlFor="community-select"
+                className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+              >
+                Community
+              </Label>
+              <Select
+                value={selectedCommunityKey}
+                onValueChange={(v) => {
+                  onCommunityChange(v);
+                  setFormError(null);
+                }}
+              >
+                <SelectTrigger id="community-select" className="h-10">
+                  <SelectValue placeholder="Select a community…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {communityOptions.length === 0 ? (
+                    <div className="px-3 py-2 text-sm text-muted-foreground">
+                      {waConnected
+                        ? "No groups yet — go to Connect and load groups."
+                        : "Connect WhatsApp first."}
+                    </div>
+                  ) : (
+                    communityOptions.map((c) => (
+                      <SelectItem key={c.key} value={c.key}>
+                        {c.label}
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="min-w-0 flex-1 space-y-1.5">
+              <Label
+                htmlFor="group-select"
+                className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+              >
+                Group
+              </Label>
+              <Select
+                value={groupJid}
+                onValueChange={(v) => {
+                  onGroupSelect(v);
+                  setFormError(null);
+                }}
+                disabled={selectedCommunityKey.length === 0}
+              >
+                <SelectTrigger id="group-select" className="h-10">
+                  <SelectValue
+                    placeholder={
+                      selectedCommunityKey.length === 0
+                        ? "Pick a community first…"
+                        : "Select Announcements or a group…"
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {channelOptions.length === 0 ? (
+                    <div className="px-3 py-2 text-sm text-muted-foreground">
+                      {selectedCommunityKey.length === 0
+                        ? "Pick a community first."
+                        : "No groups in this community."}
+                    </div>
+                  ) : (
+                    channelOptions.map((g) => {
+                      const channelLabel = waGroupChannelLabel(g);
+                      const showHint = channelDuplicateNames.has(channelLabel);
+                      return (
+                        <SelectItem key={g.jid} value={g.jid} title={g.jid}>
+                          {showHint
+                            ? formatWaGroupPickerLabel(
+                                { ...g, label: channelLabel, name: channelLabel },
+                                channelDuplicateNames,
+                              )
+                            : channelLabel}
+                        </SelectItem>
+                      );
+                    })
+                  )}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground leading-snug">
+                Community announcement channels show as <strong>Announcements</strong>.
+              </p>
+            </div>
           </div>
 
           {/* Post / Poll toggle */}

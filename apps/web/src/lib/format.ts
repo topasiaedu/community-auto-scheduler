@@ -155,9 +155,62 @@ export function queueCardModifier(status: string): string {
  */
 export function normalizeWaGroupRow(g: WaGroup): WaGroup {
   const name = typeof g.name === "string" ? g.name.trim() : "";
+  const communityName =
+    typeof g.communityName === "string" && g.communityName.trim().length > 0
+      ? g.communityName.trim()
+      : undefined;
+  const channelName =
+    typeof g.channelName === "string" && g.channelName.trim().length > 0
+      ? g.channelName.trim()
+      : undefined;
+  const labelFromParts =
+    communityName !== undefined && channelName !== undefined
+      ? `${communityName} › ${channelName}`
+      : undefined;
   const label =
-    typeof g.label === "string" && g.label.trim().length > 0 ? g.label.trim() : name;
-  return { jid: g.jid, name, label };
+    typeof g.label === "string" && g.label.trim().length > 0
+      ? g.label.trim()
+      : labelFromParts ?? name;
+  return {
+    jid: g.jid,
+    name,
+    label,
+    communityName,
+    channelName,
+    isAnnounce: g.isAnnounce === true,
+  };
+}
+
+/** Stable key for the community (or standalone) picker column. */
+export function waGroupCommunityKey(group: WaGroup): string {
+  if (group.communityName !== undefined && group.communityName.trim().length > 0) {
+    return `c:${group.communityName.trim()}`;
+  }
+  return `g:${group.jid}`;
+}
+
+/** Label for the community (or standalone group) column. */
+export function waGroupCommunityLabel(group: WaGroup): string {
+  if (group.communityName !== undefined && group.communityName.trim().length > 0) {
+    return group.communityName.trim();
+  }
+  const base =
+    group.label !== undefined && group.label.trim().length > 0
+      ? group.label.trim()
+      : group.name.trim();
+  return base.length > 0 ? base : "(unnamed group)";
+}
+
+/** Label for the channel / group column inside a community. */
+export function waGroupChannelLabel(group: WaGroup): string {
+  if (group.channelName !== undefined && group.channelName.trim().length > 0) {
+    return group.channelName.trim();
+  }
+  if (group.isAnnounce === true) {
+    return "Announcements";
+  }
+  const base = group.name.trim();
+  return base.length > 0 ? base : "(unnamed group)";
 }
 
 /**

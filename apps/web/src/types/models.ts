@@ -23,9 +23,15 @@ export type WaGroup = {
   /** Raw WhatsApp group title. */
   name: string;
   /**
-   * Display line for lists (from API), usually `"Community › Announcement"` when linked.
+   * Display line for lists (from API), usually `"Community › Announcements"` when linked.
    */
   label?: string;
+  /** Community display name when this chat is a community subgroup. */
+  communityName?: string;
+  /** Channel / subgroup name within the community (e.g. `Announcements`). */
+  channelName?: string;
+  /** True when WhatsApp marks the group as announcement-only. */
+  isAnnounce?: boolean;
 };
 
 export type ScheduledMessage = {

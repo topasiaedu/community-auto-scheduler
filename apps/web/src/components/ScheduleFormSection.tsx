@@ -22,10 +22,10 @@ import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import {
+  buildWaCommunityPickerOptions,
   formatWaGroupPickerLabel,
   waGroupChannelLabel,
   waGroupCommunityKey,
-  waGroupCommunityLabel,
 } from "../lib/format.js";
 import { ImageDropZone } from "./ImageDropZone.js";
 import type { NmcasViewModel } from "../hooks/useNmcasApp.js";
@@ -88,18 +88,7 @@ export function ScheduleFormSection({ vm }: ScheduleFormSectionProps): ReactElem
     return communityKeyOverride;
   }, [groups, groupJid, communityKeyOverride]);
 
-  const communityOptions = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const g of groups) {
-      const key = waGroupCommunityKey(g);
-      if (!map.has(key)) {
-        map.set(key, waGroupCommunityLabel(g));
-      }
-    }
-    return [...map.entries()]
-      .map(([key, label]) => ({ key, label }))
-      .sort((a, b) => a.label.localeCompare(b.label));
-  }, [groups]);
+  const communityOptions = useMemo(() => buildWaCommunityPickerOptions(groups), [groups]);
 
   const channelOptions = useMemo(() => {
     if (selectedCommunityKey.length === 0) {

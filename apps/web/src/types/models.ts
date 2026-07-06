@@ -32,6 +32,8 @@ export type WaGroup = {
   channelName?: string;
   /** True when WhatsApp marks the group as announcement-only. */
   isAnnounce?: boolean;
+  /** Parent community shell JID when known. */
+  communityJid?: string;
 };
 
 export type ScheduledMessage = {

@@ -35,9 +35,12 @@ export type WaGroupOption = {
   channelName?: string;
   /** True when WhatsApp marks the group as announcement-only. */
   isAnnounce?: boolean;
+  /** Parent community shell JID when known (stable picker key). */
+  communityJid?: string;
 };
 
 type CommunityChildMeta = {
+  communityJid: string;
   communityName: string;
   channelName: string;
   isDefaultSub: boolean;
@@ -46,7 +49,10 @@ type CommunityChildMeta = {
 /**
  * Builds picker fields from joined-group metadata and optional community child map.
  */
-function buildWaGroupOption(g: GroupInfo, childMeta: CommunityChildMeta | undefined): WaGroupOption {
+function buildWaGroupOption(
+  g: GroupInfo,
+  childMeta: CommunityChildMeta | undefined,
+): WaGroupOption {
   const nameRaw = typeof g.name === "string" ? g.name.trim() : "";
   const name = nameRaw.length > 0 ? nameRaw : "";
   const isAnnounce = g.announce === true;
@@ -69,6 +75,7 @@ function buildWaGroupOption(g: GroupInfo, childMeta: CommunityChildMeta | undefi
     return {
       jid: g.jid,
       name,
+      communityJid: childMeta.communityJid,
       communityName,
       channelName,
       isAnnounce: isAnnounce || childMeta.isDefaultSub,
@@ -216,7 +223,8 @@ export class WaManager {
       );
 
       const joined = groups.filter((g) => g.jid.endsWith("@g.us"));
-      const { parentJids, childMetaByJid } = await this.resolveCommunityLinks(client, joined);
+      const { parentJids, parentByNormName, childMetaByJid } =
+        await this.resolveCommunityLinks(client, joined);
 
       const out: WaGroupOption[] = [];
       for (const g of joined) {
@@ -224,7 +232,9 @@ export class WaManager {
           // Community shells are not postable targets in WhatsApp.
           continue;
         }
-        out.push(buildWaGroupOption(g, childMetaByJid.get(g.jid)));
+        let option = buildWaGroupOption(g, childMetaByJid.get(g.jid));
+        option = this.attachOrphanCommunityJid(option, g, parentByNormName);
+        out.push(option);
       }
 
       out.sort((a, b) => {
@@ -251,10 +261,29 @@ export class WaManager {
     joined: GroupInfo[],
   ): Promise<{
     parentJids: Set<string>;
+    /** Normalized community title → parent shell JIDs (multiple when titles collide). */
+    parentByNormName: Map<string, string[]>;
     childMetaByJid: Map<string, CommunityChildMeta>;
   }> {
     const parentJids = new Set<string>();
+    const parentByNormName = new Map<string, string[]>();
     const childMetaByJid = new Map<string, CommunityChildMeta>();
+
+    const registerParentName = (parent: GroupInfo): void => {
+      const norm =
+        typeof parent.name === "string" && parent.name.trim().length > 0
+          ? parent.name.trim().toLowerCase()
+          : "";
+      if (norm.length === 0) {
+        return;
+      }
+      const list = parentByNormName.get(norm);
+      if (list === undefined) {
+        parentByNormName.set(norm, [parent.jid]);
+      } else if (!list.includes(parent.jid)) {
+        list.push(parent.jid);
+      }
+    };
 
     const byName = new Map<string, GroupInfo[]>();
     for (const g of joined) {
@@ -288,6 +317,7 @@ export class WaManager {
           continue;
         }
         parentJids.add(parent.jid);
+        registerParentName(parent);
         const communityName =
           typeof parent.name === "string" && parent.name.trim().length > 0
             ? parent.name.trim()
@@ -304,6 +334,7 @@ export class WaManager {
                 ? "Announcements"
                 : "Group";
           childMetaByJid.set(sub.jid, {
+            communityJid: parent.jid,
             communityName,
             channelName,
             isDefaultSub: sub.isDefaultSub === true,
@@ -317,7 +348,45 @@ export class WaManager {
       }
     }
 
-    return { parentJids, childMetaByJid };
+    return { parentJids, parentByNormName, childMetaByJid };
+  }
+
+  /**
+   * Links orphan announcement channels to a parent shell when the title matches uniquely.
+   */
+  private attachOrphanCommunityJid(
+    option: WaGroupOption,
+    g: GroupInfo,
+    parentByNormName: Map<string, string[]>,
+  ): WaGroupOption {
+    if (option.communityJid !== undefined) {
+      return option;
+    }
+    const norm =
+      typeof g.name === "string" && g.name.trim().length > 0 ? g.name.trim().toLowerCase() : "";
+    if (norm.length === 0) {
+      return option;
+    }
+    const parents = parentByNormName.get(norm);
+    if (parents === undefined || parents.length !== 1) {
+      return option;
+    }
+    const communityJid = parents[0];
+    if (communityJid === undefined) {
+      return option;
+    }
+    const communityName =
+      option.communityName ??
+      (typeof g.name === "string" && g.name.trim().length > 0 ? g.name.trim() : "Community");
+    const channelName =
+      option.channelName ?? (g.announce === true ? "Announcements" : communityName);
+    return {
+      ...option,
+      communityJid,
+      communityName,
+      channelName,
+      label: `${communityName} › ${channelName}`,
+    };
   }
 
   async sendPost(groupJid: string, text: string, imageBuffer: Buffer | undefined, mimetype: string): Promise<void> {

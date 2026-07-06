@@ -177,14 +177,21 @@ export function normalizeWaGroupRow(g: WaGroup): WaGroup {
     label,
     communityName,
     channelName,
+    communityJid:
+      typeof g.communityJid === "string" && g.communityJid.trim().length > 0
+        ? g.communityJid.trim()
+        : undefined,
     isAnnounce: g.isAnnounce === true,
   };
 }
 
 /** Stable key for the community (or standalone) picker column. */
 export function waGroupCommunityKey(group: WaGroup): string {
+  if (group.communityJid !== undefined && group.communityJid.trim().length > 0) {
+    return `c:${group.communityJid.trim()}`;
+  }
   if (group.communityName !== undefined && group.communityName.trim().length > 0) {
-    return `c:${group.communityName.trim()}`;
+    return `c:name:${group.communityName.trim().toLowerCase()}`;
   }
   return `g:${group.jid}`;
 }
@@ -211,6 +218,49 @@ export function waGroupChannelLabel(group: WaGroup): string {
   }
   const base = group.name.trim();
   return base.length > 0 ? base : "(unnamed group)";
+}
+
+export type WaCommunityPickerOption = {
+  key: string;
+  label: string;
+};
+
+/**
+ * Unique community rows for the Compose picker. When titles collide (e.g. two "RDW 3.0"
+ * communities), appends a short parent/group id hint.
+ */
+export function buildWaCommunityPickerOptions(groups: readonly WaGroup[]): WaCommunityPickerOption[] {
+  const byKey = new Map<string, string>();
+  for (const g of groups) {
+    const key = waGroupCommunityKey(g);
+    if (!byKey.has(key)) {
+      byKey.set(key, waGroupCommunityLabel(g));
+    }
+  }
+  const raw = [...byKey.entries()].map(([key, label]) => ({ key, label }));
+  const labelCounts = new Map<string, number>();
+  for (const row of raw) {
+    const norm = row.label.trim().toLowerCase();
+    labelCounts.set(norm, (labelCounts.get(norm) ?? 0) + 1);
+  }
+  return raw
+    .map((row) => {
+      const norm = row.label.trim().toLowerCase();
+      if ((labelCounts.get(norm) ?? 0) <= 1) {
+        return row;
+      }
+      const jid =
+        row.key.startsWith("c:") && !row.key.startsWith("c:name:")
+          ? row.key.slice("c:".length)
+          : row.key.startsWith("g:")
+            ? row.key.slice("g:".length)
+            : groups.find((g) => waGroupCommunityKey(g) === row.key)?.jid ?? "";
+      if (jid.length === 0) {
+        return row;
+      }
+      return { key: row.key, label: `${row.label} · ${formatWaGroupJidHint(jid)}` };
+    })
+    .sort((a, b) => a.label.localeCompare(b.label));
 }
 
 /**

@@ -225,6 +225,11 @@ export type WaCommunityPickerOption = {
   label: string;
 };
 
+/** True when the picker row is a regular group, not a multi-channel community. */
+export function waGroupIsStandaloneDestination(communityKey: string): boolean {
+  return communityKey.startsWith("g:");
+}
+
 /**
  * Unique community rows for the Compose picker. When titles collide (e.g. two "RDW 3.0"
  * communities), appends a short parent/group id hint.

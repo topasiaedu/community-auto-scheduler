@@ -20,7 +20,7 @@ export function ComposePage(): ReactElement {
     <div className="page-stack">
       <PageHeader
         title="Compose"
-        description="Pick a group, write your message, and schedule it in Malaysia Time (MYT)."
+        description="Choose a community (and channel if needed), write your message, and schedule it in Malaysia Time (MYT)."
       />
 
       <div className="compose-layout">

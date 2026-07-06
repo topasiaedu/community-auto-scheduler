@@ -26,6 +26,7 @@ import {
   formatWaGroupPickerLabel,
   waGroupChannelLabel,
   waGroupCommunityKey,
+  waGroupIsStandaloneDestination,
 } from "../lib/format.js";
 import { ImageDropZone } from "./ImageDropZone.js";
 import type { NmcasViewModel } from "../hooks/useNmcasApp.js";
@@ -114,6 +115,10 @@ export function ScheduleFormSection({ vm }: ScheduleFormSectionProps): ReactElem
     return duplicate;
   }, [channelOptions]);
 
+  const isStandaloneDestination = waGroupIsStandaloneDestination(selectedCommunityKey);
+  /** Hide channel row when it would repeat the community name or there is only one option. */
+  const showChannelPicker = !isStandaloneDestination && channelOptions.length > 1;
+
   const onCommunityChange = (key: string): void => {
     setCommunityKeyOverride(key);
     const channels = groups.filter((g) => waGroupCommunityKey(g) === key);
@@ -160,17 +165,21 @@ export function ScheduleFormSection({ vm }: ScheduleFormSectionProps): ReactElem
         </Alert>
       ) : null}
 
-      {/* ── Single unified compose card ── */}
+      {/* Destination + message type */}
       <div className="rounded-xl border border-border bg-card shadow-sm">
-        {/* Section: Community + channel/group + Type */}
-        <div className="flex flex-col gap-4 p-5 lg:flex-row lg:items-end">
-          <div className="flex min-w-0 flex-1 flex-col gap-4 sm:flex-row">
-            <div className="min-w-0 flex-1 space-y-1.5">
+        <div className="space-y-4 p-5">
+          <div
+            className={cn(
+              "grid gap-4",
+              showChannelPicker ? "md:grid-cols-2" : "md:grid-cols-1",
+            )}
+          >
+            <div className="min-w-0 space-y-1.5">
               <Label
                 htmlFor="community-select"
                 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
               >
-                Community
+                {isStandaloneDestination ? "WhatsApp group" : "Community"}
               </Label>
               <Select
                 value={selectedCommunityKey}
@@ -179,8 +188,8 @@ export function ScheduleFormSection({ vm }: ScheduleFormSectionProps): ReactElem
                   setFormError(null);
                 }}
               >
-                <SelectTrigger id="community-select" className="h-10">
-                  <SelectValue placeholder="Select a community…" />
+                <SelectTrigger id="community-select" className="h-10 w-full">
+                  <SelectValue placeholder="Select where to post…" />
                 </SelectTrigger>
                 <SelectContent>
                   {communityOptions.length === 0 ? (
@@ -200,39 +209,26 @@ export function ScheduleFormSection({ vm }: ScheduleFormSectionProps): ReactElem
               </Select>
             </div>
 
-            <div className="min-w-0 flex-1 space-y-1.5">
-              <Label
-                htmlFor="group-select"
-                className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-              >
-                Group
-              </Label>
-              <Select
-                value={groupJid}
-                onValueChange={(v) => {
-                  onGroupSelect(v);
-                  setFormError(null);
-                }}
-                disabled={selectedCommunityKey.length === 0}
-              >
-                <SelectTrigger id="group-select" className="h-10">
-                  <SelectValue
-                    placeholder={
-                      selectedCommunityKey.length === 0
-                        ? "Pick a community first…"
-                        : "Select Announcements or a group…"
-                    }
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  {channelOptions.length === 0 ? (
-                    <div className="px-3 py-2 text-sm text-muted-foreground">
-                      {selectedCommunityKey.length === 0
-                        ? "Pick a community first."
-                        : "No groups in this community."}
-                    </div>
-                  ) : (
-                    channelOptions.map((g) => {
+            {showChannelPicker ? (
+              <div className="min-w-0 space-y-1.5">
+                <Label
+                  htmlFor="group-select"
+                  className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+                >
+                  Channel
+                </Label>
+                <Select
+                  value={groupJid}
+                  onValueChange={(v) => {
+                    onGroupSelect(v);
+                    setFormError(null);
+                  }}
+                >
+                  <SelectTrigger id="group-select" className="h-10 w-full">
+                    <SelectValue placeholder="Select Announcements or a group…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {channelOptions.map((g) => {
                       const channelLabel = waGroupChannelLabel(g);
                       const showHint = channelDuplicateNames.has(channelLabel);
                       return (
@@ -245,22 +241,24 @@ export function ScheduleFormSection({ vm }: ScheduleFormSectionProps): ReactElem
                             : channelLabel}
                         </SelectItem>
                       );
-                    })
-                  )}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground leading-snug">
-                Community announcement channels show as <strong>Announcements</strong>.
-              </p>
-            </div>
+                    })}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : null}
           </div>
 
-          {/* Post / Poll toggle */}
-          <div className="flex-shrink-0 space-y-1.5">
+          {!isStandaloneDestination && showChannelPicker ? (
+            <p className="text-xs text-muted-foreground leading-snug">
+              Pick the community, then choose <strong>Announcements</strong> or another channel inside it.
+            </p>
+          ) : null}
+
+          <div className="max-w-[220px] space-y-1.5">
             <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Type
+              Message type
             </Label>
-            <div className="flex rounded-lg border border-border overflow-hidden h-10">
+            <div className="flex h-10 overflow-hidden rounded-lg border border-border">
               {(["POST", "POLL"] as MessageKind[]).map((k) => (
                 <button
                   key={k}
@@ -270,7 +268,7 @@ export function ScheduleFormSection({ vm }: ScheduleFormSectionProps): ReactElem
                     setFormError(null);
                   }}
                   className={cn(
-                    "flex-1 px-5 text-sm font-medium transition-colors",
+                    "flex-1 px-4 text-sm font-medium transition-colors",
                     messageKind === k
                       ? "bg-primary text-primary-foreground"
                       : "bg-background text-muted-foreground hover:bg-muted",

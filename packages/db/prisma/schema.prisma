@@ -23,15 +23,41 @@ enum MessageStatus {
   CANCELLED
 }
 
+enum OperatorKind {
+  REMINDER
+  VALUE
+}
+
+enum ValueFormat {
+  IMAGE_CAPTION
+  TEXT_ONLY
+  POLL
+}
+
+enum ReminderFormat {
+  IMAGE
+  TEXT
+  STICKER
+}
+
+enum ScheduleRuleKind {
+  WEBINAR_DATE_OFFSET
+  EVENT_START_OFFSET
+}
+
 model Project {
-  id               String                  @id @default(cuid())
-  name             String
-  description      String?
-  createdAt        DateTime                @default(now())
-  messages         ScheduledMessage[]
-  notifyRecipients NotifyRecipient[]
-  members          ProjectMember[]
-  userPreferences  UserProjectPreference[]
+  id                String                  @id @default(cuid())
+  name              String
+  description       String?
+  sopUrl            String?
+  campaignNote      String?
+  createdAt         DateTime                @default(now())
+  messages          ScheduledMessage[]
+  notifyRecipients  NotifyRecipient[]
+  members           ProjectMember[]
+  userPreferences   UserProjectPreference[]
+  campaigns         Campaign[]
+  reminderTemplates ReminderTemplate[]
 }
 
 // Links a Supabase Auth user id to a Project (see API X-Project-Id membership checks).
@@ -57,29 +83,74 @@ model NotifyRecipient {
   @@index([projectId])
 }
 
+model Campaign {
+  id                String             @id @default(cuid())
+  projectId         String
+  project           Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  webinarDate       DateTime           @db.Date
+  eventStartTimeMyt String
+  reminderGroupJid  String
+  reminderGroupName String
+  customValues      Json
+  createdAt         DateTime           @default(now())
+  messages          ScheduledMessage[]
+
+  @@index([projectId])
+}
+
+model ReminderTemplate {
+  id                 String             @id @default(cuid())
+  projectId          String
+  project            Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  slotKey            String
+  name               String
+  reminderFormat     ReminderFormat
+  mediaUrl           String?
+  stickerUrl         String?
+  bodyTemplate       String?
+  scheduleRuleKind   ScheduleRuleKind
+  dayOffset          Int?
+  clockTimeMyt       String?
+  startOffsetMinutes Int?
+  sortOrder          Int
+  scheduledMessages  ScheduledMessage[]
+
+  @@unique([projectId, slotKey])
+  @@index([projectId])
+}
+
 model ScheduledMessage {
-  id               String        @id @default(cuid())
-  projectId        String
-  project          Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  groupJid         String
-  groupName        String
-  type             MessageType
-  copyText         String?
-  imageUrl         String?
-  pollQuestion     String?
-  pollOptions      String[]      @default([])
-  pollMultiSelect  Boolean       @default(false)
-  scheduledAt      DateTime
-  status           MessageStatus @default(PENDING)
-  sentAt           DateTime?
-  error            String?
-  createdAt        DateTime      @default(now())
+  id                 String            @id @default(cuid())
+  projectId          String
+  project            Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  groupJid           String
+  groupName          String
+  type               MessageType
+  operatorKind       OperatorKind?
+  valueFormat        ValueFormat?
+  reminderFormat     ReminderFormat?
+  reminderTemplateId String?
+  reminderTemplate   ReminderTemplate? @relation(fields: [reminderTemplateId], references: [id], onDelete: SetNull)
+  campaignId         String?
+  campaign           Campaign?         @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  copyText           String?
+  imageUrl           String?
+  stickerUrl         String?
+  pollQuestion       String?
+  pollOptions        String[]          @default([])
+  pollMultiSelect    Boolean           @default(false)
+  scheduledAt        DateTime
+  status             MessageStatus     @default(PENDING)
+  sentAt             DateTime?
+  error              String?
+  createdAt          DateTime          @default(now())
   /// pg-boss job id for cancel/reschedule; null for DRAFT rows not yet queued or legacy rows.
-  pgBossJobId      String?
+  pgBossJobId        String?
   /// Supabase Auth `user.id` of who created the schedule.
-  createdByUserId  String?
+  createdByUserId    String?
 
   @@index([projectId, scheduledAt])
+  @@index([campaignId])
 }
 
 /// Per-user UI preferences for a project (e.g. last selected WhatsApp group).

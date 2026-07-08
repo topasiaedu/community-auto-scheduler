@@ -1,5 +1,5 @@
 /**
- * Connect — WhatsApp linking and API diagnostics.
+ * WhatsApp — linking and API diagnostics.
  */
 
 import { useEffect, type ReactElement } from "react";
@@ -12,13 +12,13 @@ export function ConnectPage(): ReactElement {
   const vm = useNmcasVm();
 
   useEffect(() => {
-    document.title = "Connect · NMCAS";
+    document.title = "WhatsApp · NMCAS";
   }, []);
 
   return (
     <div className="page-stack">
       <PageHeader
-        title="Connect"
+        title="WhatsApp"
         description="Link this project's WhatsApp account by scanning a QR code. Each project has its own WhatsApp session."
       />
       <WhatsAppSection vm={vm} />

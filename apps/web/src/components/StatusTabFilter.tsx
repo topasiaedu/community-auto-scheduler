@@ -1,18 +1,12 @@
 /**
- * Horizontal tab-pill status filter — uses shadcn Tabs.
- * All · Scheduled · Drafts · Sent · Failed
+ * Horizontal status tabs plus queue kind filter chips (P7 UX spec §7).
  */
 
 import type { ReactElement } from "react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import type { QueueKindFilter } from "../lib/queueLabels.js";
 import type { NmcasViewModel } from "../hooks/useNmcasApp.js";
 
 const STATUS_TABS = [
@@ -23,42 +17,40 @@ const STATUS_TABS = [
   { label: "Failed", value: "FAILED" },
 ] as const;
 
+const KIND_CHIPS: { label: string; value: QueueKindFilter }[] = [
+  { label: "All", value: "all" },
+  { label: "Campaign", value: "campaign" },
+  { label: "Other", value: "other" },
+  { label: "Reminder", value: "reminder" },
+  { label: "Value", value: "value" },
+];
+
 type StatusTabFilterProps = {
   vm: NmcasViewModel;
+  kindFilter: QueueKindFilter;
+  onKindFilterChange: (value: QueueKindFilter) => void;
 };
 
-export function StatusTabFilter({ vm }: StatusTabFilterProps): ReactElement {
-  const { filterStatus, setFilterStatus, filterType, setFilterType, refreshMessages } = vm;
+export function StatusTabFilter({
+  vm,
+  kindFilter,
+  onKindFilterChange,
+}: StatusTabFilterProps): ReactElement {
+  const { filterStatus, setFilterStatus, refreshMessages } = vm;
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      <Tabs
-        value={filterStatus}
-        onValueChange={(v) => setFilterStatus(v)}
-      >
-        <TabsList className="h-9">
-          {STATUS_TABS.map((tab) => (
-            <TabsTrigger key={tab.value} value={tab.value} className="text-xs px-3">
-              {tab.label}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-      </Tabs>
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Tabs value={filterStatus} onValueChange={(v) => setFilterStatus(v)}>
+          <TabsList className="h-9">
+            {STATUS_TABS.map((tab) => (
+              <TabsTrigger key={tab.value} value={tab.value} className="text-xs px-3">
+                {tab.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
 
-      <div className="flex items-center gap-2">
-        <Select
-          value={filterType === "" ? "all" : filterType}
-          onValueChange={(v) => setFilterType(v === "all" ? "" : v)}
-        >
-          <SelectTrigger className="h-8 w-[110px] text-xs">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All types</SelectItem>
-            <SelectItem value="POST">Post</SelectItem>
-            <SelectItem value="POLL">Poll</SelectItem>
-          </SelectContent>
-        </Select>
         <Button
           size="sm"
           variant="ghost"
@@ -67,6 +59,28 @@ export function StatusTabFilter({ vm }: StatusTabFilterProps): ReactElement {
         >
           Refresh
         </Button>
+      </div>
+
+      <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter by message kind">
+        {KIND_CHIPS.map((chip) => {
+          const active = kindFilter === chip.value;
+          return (
+            <button
+              key={chip.value}
+              type="button"
+              aria-pressed={active}
+              className={cn(
+                "rounded-full border px-3 py-1 text-xs font-medium transition-colors min-h-[32px]",
+                active
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "border-border bg-background text-muted-foreground hover:bg-muted/50",
+              )}
+              onClick={() => onKindFilterChange(chip.value)}
+            >
+              {chip.label}
+            </button>
+          );
+        })}
       </div>
     </div>
   );

@@ -10,7 +10,7 @@ import {
 } from "@whatsmeow-node/whatsmeow-node";
 import type { PrismaClient } from "@nmcas/db";
 import type { ApiEnv } from "../env.js";
-import { sendGroupImage, sendGroupPoll, sendGroupText, withTempImageFile } from "./wa-send.js";
+import { sendGroupImage, sendGroupPoll, sendGroupSticker, sendGroupText, withTempImageFile } from "./wa-send.js";
 import {
   hydrateWhatsAppSessionFromBlob,
   persistWhatsAppSessionToBlob,
@@ -414,6 +414,16 @@ export class WaManager {
       throw new Error("WhatsApp client is not initialized");
     }
     await sendGroupPoll(client, groupJid, question, options, selectableCount);
+  }
+
+  async sendSticker(groupJid: string, stickerBuffer: Buffer): Promise<void> {
+    const client = this.client;
+    if (client === undefined) {
+      throw new Error("WhatsApp client is not initialized");
+    }
+    await withTempImageFile(stickerBuffer, "image/webp", async (filePath) => {
+      await sendGroupSticker(client, groupJid, filePath);
+    });
   }
 
   async sendDirectText(msisdnJid: string, text: string): Promise<void> {

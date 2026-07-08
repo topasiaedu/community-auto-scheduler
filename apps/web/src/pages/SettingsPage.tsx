@@ -20,6 +20,8 @@ import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useNmcasVm } from "../context/NmcasVmContext.js";
 import { PageHeader } from "../components/PageHeader.js";
+import { ProjectLinksCard } from "../components/settings/ProjectLinksCard.js";
+import { ReminderTemplateLibrary } from "../components/settings/ReminderTemplateLibrary.js";
 
 export function SettingsPage(): ReactElement {
   const vm = useNmcasVm();
@@ -27,6 +29,15 @@ export function SettingsPage(): ReactElement {
 
   useEffect(() => {
     document.title = "Settings · NMCAS";
+  }, []);
+
+  useEffect(() => {
+    if (window.location.hash === "#reminder-templates") {
+      const el = document.getElementById("reminder-templates");
+      if (el !== null) {
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }
   }, []);
 
   const {
@@ -44,8 +55,11 @@ export function SettingsPage(): ReactElement {
     createProjectSubmitting,
     createProjectError,
     onCreateProject,
+    loadProjects,
     onSignOut,
   } = vm;
+
+  const selectedProject = projects.find((p) => p.id === selectedProjectId);
 
   const handleCreateProject = (ev: FormEvent) => {
     onCreateProject(ev);
@@ -54,7 +68,18 @@ export function SettingsPage(): ReactElement {
 
   return (
     <div className="page-stack">
-      <PageHeader title="Settings" description="Switch workspace, manage projects, and sign out." />
+      <PageHeader
+        title="Settings"
+        description="Project links, reminder templates, workspace, and sign out."
+      />
+
+      <ProjectLinksCard
+        session={session}
+        project={selectedProject}
+        onSaved={() => void loadProjects()}
+      />
+
+      <ReminderTemplateLibrary session={session} projectId={selectedProjectId} />
 
       {/* Active workspace */}
       <Card>

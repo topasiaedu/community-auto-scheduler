@@ -1,7 +1,7 @@
 ---
 title: "Source digest: WhatsApp Community SOP (Dr Jasmine Show Up)"
 type: "source-summary"
-updated: "2026-07-07"
+updated: "2026-07-08"
 sources: 1
 tags: ["nmcas", "sop", "reference", "campaign-schedule", "reminder", "value-post"]
 ---
@@ -15,8 +15,6 @@ tags: ["nmcas", "sop", "reference", "campaign-schedule", "reminder", "value-post
 
 Example campaign SOP with **two tracks** — **Show Up** (6-message fixed reminder sequence) and **Value Post** (3 fresh content posts) — each with exact MYT clock times anchored to the webinar date, plus two go-live messages anchored to event start.
 
-> Corrects earlier fabricated timings (no "10 AM everywhere", no "1h before", no "2h after end"). Transcribed from the Quick Reference Timeline and Full Posting Schedule screenshots.
-
 ## Show Up sequence (Reminders)
 
 | # | Message | Trigger (MYT) |
@@ -25,8 +23,8 @@ Example campaign SOP with **two tracks** — **Show Up** (6-message fixed remind
 | 02 | 2-Day Countdown | 2 days before @ 3:00 PM |
 | 03 | 1-Day Countdown | 1 day before @ 8:00 PM |
 | 04 | Starting Soon | Webinar day @ 11:00 AM |
-| 05 | LIVE NOW | Webinar day @ 7:58 PM (≈ start − 2 min) |
-| 06 | Sticker | Webinar day @ 8:18 PM (≈ start + 18 min) |
+| 05 | LIVE NOW | event start − 2 min |
+| 06 | Sticker | event start + 18 min |
 
 ## Value Post track (Value)
 
@@ -36,45 +34,43 @@ Example campaign SOP with **two tracks** — **Show Up** (6-message fixed remind
 | 1 day before @ 11:00 AM | Morning of 1-day before |
 | Day after live @ 11:00 AM | Post-webinar follow-up |
 
-## Key corrections
+## Content mapping (resolved 2026-07-07)
 
-- SOP has **two tracks** (Show Up / Value Post) — maps to Reminder / Value.
-- **Welcome = T−4 days @ 3 PM** (not on-join, not T−0).
-- **Starting Soon = webinar-day 11 AM** (a morning-of message), **not** "1 hour before".
-- **LIVE NOW / Sticker** are the only event-start-anchored rows (−2 min / +18 min).
-- **No** "2 hours after end" row exists.
-- Webinar start inferred ~**8:00 PM**.
+| SOP message | NMCAS kind | Format |
+|-------------|------------|--------|
+| Welcome, 2d, 1d, Starting Soon | Reminder | IMAGE + templated caption |
+| LIVE NOW | Reminder | TEXT only (no image) |
+| Sticker | Reminder | STICKER (no caption) |
+| Value Posts ×3 | Value | IMAGE_CAPTION |
 
-## Timing model → NMCAS chips
+## Timing model → NMCAS
 
-Two anchors required on the Schedule screen:
+Two anchors on campaign Step 1:
 
-- **Webinar date** → `date − N days @ fixed MYT time` (most rows)
+- **Webinar date** → `date − N days @ fixed MYT time`
 - **Event start time** → minute offsets (LIVE NOW, Sticker)
 
-See [[wiki/concepts/campaign-message-schedule]] for the chip design.
+Clock times are **fixed** — not editable per campaign. See [[wiki/concepts/campaign-message-schedule]].
 
-## Content mapping
+## Custom Values (8 fields)
 
-| SOP message | NMCAS |
-|-------------|-------|
-| Welcome, countdowns, starting soon | Reminder image |
-| LIVE NOW (live link) | Reminder image + caption, or link message (open question) |
-| Sticker | Reminder sticker (no caption) |
-| Value Posts ×3 | Value image + caption |
+Workshop day/date/time, zoom link, session date/time, zoom ID, zoom passcode — merge into Reminder `bodyTemplate` at schedule time. Full field spec: [[wiki/analysis/p7-ux-spec]] §4 Step 1.
 
 ## Wiki integration
 
-- [[wiki/concepts/campaign-message-schedule]] — slot + trigger + chip anchors
+- [[wiki/concepts/campaign-message-schedule]] — slot + trigger
 - [[wiki/concepts/value-vs-reminder-messages]] — Show Up→Reminder, Value Post→Value
-- [[wiki/sources/2026-07-06-whatsmeow-deploy-product-ux-session]] — prior session (its §6 timings superseded)
-- [[wiki/entities/scheduled-message]] — chips + templates
+- [[wiki/analysis/p7-ux-spec]] — wizard, API, acceptance matrix
+- [[wiki/analysis/p7-implementation-plan]] — build phases
 
-## Open questions
+## Resolved questions (formerly open)
 
-- LIVE NOW: Reminder image w/ caption vs dedicated link message?
-- Are 3 PM / 11 AM / 8 PM defaults per template (editable) or campaign-specific?
-- Expose minute-precision event-start anchoring (for +18 min sticker)?
+| Question | Resolution |
+|----------|------------|
+| LIVE NOW format | **TEXT only** — confirmed in SOP HTML |
+| Editable 3 PM / 11 AM / 8 PM | **Fixed** in v1 — intern sets webinar date + event start only |
+| Event-start anchoring | **Yes** — LIVE NOW −2 min, Sticker +18 min |
+| Image Reminder captions | **Required** for Welcome through Starting Soon |
 
 ## See also
 

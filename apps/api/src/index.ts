@@ -13,9 +13,11 @@ import {
   createRequireProjectAccessPreHandler,
 } from "./auth/supabase-auth.js";
 import { loadApiEnv } from "./env.js";
+import { registerCampaignRoutes } from "./routes/campaigns.js";
 import { registerMessageRoutes } from "./routes/messages.js";
 import { registerPreferencesRoutes } from "./routes/preferences.js";
 import { registerProjectRoutes } from "./routes/projects.js";
+import { registerTemplateRoutes } from "./routes/templates.js";
 import { registerUploadRoutes } from "./routes/uploads.js";
 import { registerWaRoutes } from "./routes/wa.js";
 import { SEND_SCHEDULED_MESSAGE_QUEUE } from "./queues.js";
@@ -124,6 +126,8 @@ async function main(): Promise<void> {
     await authScope.register(async (projectScope) => {
       projectScope.addHook("preHandler", requireProject);
       registerWaRoutes(projectScope, waPool);
+      registerTemplateRoutes(projectScope, prisma);
+      registerCampaignRoutes(projectScope, { prisma, boss, waPool });
       registerMessageRoutes(projectScope, { prisma, boss });
       registerPreferencesRoutes(projectScope, prisma);
       await registerUploadRoutes(projectScope, env);

@@ -64,3 +64,23 @@ Append-only timeline of ingests, filed queries, and lint passes. Newest entries 
 
 - Wiki: [[wiki/analysis/p7-implementation-plan]], [[index]]
 - Notes: Consolidated build plan with HTML SOP extract: Custom Values (8 fields), Reminder bodyTemplate merge, campaign wizard, 7 build phases. LIVE NOW=text; Show Up image slots=image+caption; sticker +18m; alternate-day Value suggestions.
+
+## [2026-07-08] query | P7 UX spec filed + wiki lint
+
+- Wiki: [[wiki/analysis/p7-ux-spec]], [[wiki/analysis/p7-implementation-plan]], [[wiki/concepts/value-vs-reminder-messages]], [[wiki/concepts/campaign-message-schedule]], [[wiki/entities/scheduled-message]], [[wiki/entities/project]], [[wiki/sources/2026-07-07-whatsapp-community-sop-dr-jasmine-show-up-reference]], [[wiki/sources/2026-07-06-whatsmeow-deploy-product-ux-session]], [[index]]
+- Notes: Agent-ready supplement: 5-step campaign wizard, single-message mode, Settings template library, API JSON contracts, fan-out resolver, placeholder syntax, acceptance matrix, v1 out-of-scope. Reconciled contradictions (LIVE NOW=text, image Reminder captions required, fixed clock times, template library in v1, wizard vs one-page). Render + Vercel MCP noted for Phase 7 smoke tests.
+
+## [2026-07-08] lint | P7 Phase 7 integration test + production smoke
+
+- Wiki: [[wiki/analysis/p7-ux-spec]] (§11 acceptance matrix, §12 edge cases, §14 deploy)
+- Findings:
+  - **Unit tests (local):** PASS — `@nmcas/api` campaignSchedule (6), `@nmcas/web` campaignSchedule (12), `@nmcas/db` mergeTemplate (6); `@nmcas/api` + `@nmcas/web` typecheck clean.
+  - **§11 matrix rows 1–9 (slot times):** PASS locally via `campaignSchedule.test.ts` (MYT times match spec); **MANUAL/PENDING production** — P7 code not deployed.
+  - **§11 overall (12 rows, merge, campaign group):** MANUAL/PENDING — requires `POST /campaigns/schedule` E2E on test project after deploy.
+  - **§12 animated WebP:** PASS code — `uploads.ts` + `isAnimatedWebP()` returns 400 `"Animated stickers are not supported. Export a static WebP."`; no unit test file yet.
+  - **§12 template snapshot:** PASS code — `campaigns.ts` snapshots `copyText` / `imageUrl` / `stickerUrl` onto `ScheduledMessage` at schedule time.
+  - **§12 legacy POST/POLL worker:** PASS code — `send-scheduled-message.ts` `sendLegacyMessage()` when `operatorKind === null`.
+  - **§12 FAILED re-queue:** PASS code — `POST /messages/:id/requeue` + `QueueCard` confirmation UI.
+  - **§14 deploy smoke:** API `GET /health` 200 `{ ok: true }`; `GET /ready` `{ database: true, pgBoss: true }`. `GET /templates` → **404** (pre-P7 API on Render). Vercel production `READY` but latest deploy commit `9b1d29b` (docs only; local P7 waves uncommitted). `/schedule` + `/queue` return SPA shell 200; P7 wizard not in deployed bundle. Render MCP **unauthorized** (could not `list_deploys`).
+- Fixes made: none (no test/typecheck failures).
+- Manual steps: commit + push P7; run migration `20260708170000_p7_phase1_campaign_schema` on Render; redeploy API + web; re-auth Render MCP; campaign E2E on test project (2 Announcements communities); spot-check animated WebP upload + FAILED re-queue.

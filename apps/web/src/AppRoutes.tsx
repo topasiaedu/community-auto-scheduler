@@ -9,7 +9,7 @@ import { ProtectedLayout } from "./layouts/ProtectedLayout.js";
 import { AppShell } from "./layouts/AppShell.js";
 import { SignInPage } from "./pages/SignInPage.js";
 import { QueuePage } from "./pages/QueuePage.js";
-import { ComposePage } from "./pages/ComposePage.js";
+import { SchedulePage } from "./pages/SchedulePage.js";
 import { ConnectPage } from "./pages/ConnectPage.js";
 import { SettingsPage } from "./pages/SettingsPage.js";
 
@@ -37,12 +37,13 @@ export function AppRoutes(): ReactElement {
         <Route element={<AppShell />}>
           <Route index element={<Navigate to="/queue" replace />} />
           <Route path="queue" element={<QueuePage />} />
-          <Route path="compose" element={<ComposePage />} />
-          <Route path="connect" element={<ConnectPage />} />
+          <Route path="schedule" element={<SchedulePage />} />
+          <Route path="compose" element={<Navigate to="/schedule" replace />} />
+          <Route path="whatsapp" element={<ConnectPage />} />
+          <Route path="connect" element={<Navigate to="/whatsapp" replace />} />
           <Route path="settings" element={<SettingsPage />} />
           {/* Legacy redirects */}
           <Route path="dashboard" element={<Navigate to="/queue" replace />} />
-          <Route path="schedule" element={<Navigate to="/compose" replace />} />
           <Route path="messages" element={<Navigate to="/queue" replace />} />
           <Route path="account" element={<Navigate to="/settings" replace />} />
         </Route>

@@ -70,6 +70,36 @@ export async function withTempImageFile(
   }
 }
 
+/** Standard static WebP sticker dimensions per WhatsApp SOP. */
+const STICKER_WIDTH = 512;
+const STICKER_HEIGHT = 512;
+
+/**
+ * Uploads a static WebP sticker and sends it to a group with `messageSecret` (no caption).
+ */
+export async function sendGroupSticker(
+  client: WhatsmeowClient,
+  groupJid: string,
+  stickerFilePath: string,
+): Promise<void> {
+  const media = await client.uploadMedia(stickerFilePath, "image");
+  const stickerMessage: Record<string, unknown> = {
+    URL: media.URL,
+    directPath: media.directPath,
+    mediaKey: media.mediaKey,
+    fileEncSHA256: media.fileEncSHA256,
+    fileSHA256: media.fileSHA256,
+    fileLength: String(media.fileLength),
+    mimetype: "image/webp",
+    width: STICKER_WIDTH,
+    height: STICKER_HEIGHT,
+  };
+  await client.sendRawMessage(groupJid, {
+    stickerMessage,
+    messageContextInfo: createMessageContextInfo(),
+  });
+}
+
 /**
  * Sends a native WhatsApp poll (`sendPollCreation` includes poll message secret in whatsmeow).
  */

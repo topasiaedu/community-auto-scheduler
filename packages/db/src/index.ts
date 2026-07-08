@@ -32,4 +32,22 @@ function appendUrlParam(url: string, key: string, value: string): string {
 }
 
 export { PrismaClient } from "@prisma/client";
-export type { MessageStatus, MessageType, Project, ScheduledMessage } from "@prisma/client";
+export type {
+  Campaign,
+  MessageStatus,
+  MessageType,
+  OperatorKind,
+  Project,
+  ReminderFormat,
+  ReminderTemplate,
+  ScheduleRuleKind,
+  ScheduledMessage,
+  ValueFormat,
+} from "@prisma/client";
+export type { CampaignCustomValues } from "./campaignTypes.js";
+export {
+  REMINDER_TEMPLATE_SLOT_DEFINITIONS,
+  seedReminderTemplatesForProject,
+  type ReminderTemplateSlotDefinition,
+} from "./reminderTemplateDefaults.js";
+export { hasUnresolvedPlaceholders, mergeTemplate } from "./mergeTemplate.js";

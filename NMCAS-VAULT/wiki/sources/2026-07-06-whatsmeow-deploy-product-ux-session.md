@@ -1,7 +1,7 @@
 ---
 title: "Source digest: whatsmeow deploy + Value vs Reminder (2026-07-06)"
 type: "source-summary"
-updated: "2026-07-06"
+updated: "2026-07-08"
 sources: 1
 tags: ["nmcas", "whatsmeow", "deploy", "product", "ux", "reminder", "value-post"]
 ---
@@ -12,44 +12,49 @@ tags: ["nmcas", "whatsmeow", "deploy", "product", "ux", "reminder", "value-post"
 
 ## One-line summary
 
-Production deploy on **Render + Vercel + Supabase** is live with **whatsmeow-node** and **SQLite→`WhatsAppSessionBlob`** sessions; product direction shifts from generic Post/Poll to **Value post** (fresh copy, poll nested) vs **Reminder** (all SOP templates including countdown graphics and stickers); UX plan targets **intern-ready** Schedule flow — **not yet implemented**.
+Production deploy on **Render + Vercel + Supabase** is live with **whatsmeow-node** and **SQLite→`WhatsAppSessionBlob`** sessions; product direction shifts from generic Post/Poll to **Value post** vs **Reminder**; full intern UX is specified in [[wiki/analysis/p7-ux-spec]] — **not yet implemented**.
 
 ## Key engineering claims (shipped)
 
 - **Stack:** `@whatsmeow-node/whatsmeow-node`, `messageSecret` on community sends, pg-boss worker unchanged in role.
-- **Sessions:** Local SQLite per project, bytes in Postgres `WhatsAppSessionBlob`; pooler `DATABASE_URL` OK; `WHATSAPP_STORE_URL` optional on Render.
+- **Sessions:** Local SQLite per project, bytes in Postgres `WhatsAppSessionBlob`; pooler `DATABASE_URL` OK.
 - **URLs:** API `community-auto-scheduler.onrender.com`; web `community-auto-scheduler-web.vercel.app`.
 - **UI fixes:** QR via `qrcode.react`; Community + Channel picker for Announcements; compose layout fixes.
 
-## Key product claims (decided, pending code)
+## Key product claims (locked in P7)
 
-- **Value post** = new copy each campaign; formats: image+caption (default), poll, text-only.
-- **Reminder** = anything from project SOP: stickers (no caption), countdown/welcome graphics (image, usually no caption).
-- **Countdown graphics are Reminders**, not Value posts (owner correction).
-- **Multi-project:** same flow, per-project SOP assets — no single-campaign hardcoding.
-- **Poll** stays under Value, not top-level.
+- **Value post** = fresh copy; campaign wizard uses IMAGE_CAPTION only; poll/text in single-message mode.
+- **Reminder** = SOP templates; IMAGE slots require templated caption; LIVE NOW = TEXT; sticker = STICKER only.
+- **Countdown graphics are Reminders**, not Value posts.
+- **Multi-project:** per-project template library + campaigns.
 
-## Key UX claims (planned)
+## UX superseded by P7 (2026-07-08)
 
-- Nav: Queue / **Schedule** / **WhatsApp** / Settings.
-- Compose: ① Where ② Value|Reminder ③ Content ④ When (MYT) + confirm modal.
-- Settings: per-project SOP URL + campaign note; later template library.
+This raw session proposed a **one-page** Schedule (no wizard) and Reminders with **no caption by default**. **Superseded** by:
 
-## Wiki integration
+- [[wiki/analysis/p7-ux-spec]] — 5-step campaign wizard + single-message mode
+- [[wiki/analysis/p7-implementation-plan]] — build phases
+- [[wiki/concepts/value-vs-reminder-messages]] — caption rules
 
-- [[wiki/overview]] — runtime stack + phased plan note
-- [[wiki/concepts/value-vs-reminder-messages]] — operator message model
-- [[wiki/concepts/wa-connection-pool]] — whatsmeow + session blob addendum
-- [[wiki/entities/scheduled-message]] — planned fields / open questions
-- [[wiki/sources/2026-04-21-stability-hardening-session]] — prior worker/rescue behaviour still applies
+Nav rename (Schedule / WhatsApp) and confirm modals from this session **still apply**.
 
 ## Superseded timings (2026-07-07)
 
-§6 event-day “1hr, 15min, live” and vague “starting soon” were **lossy/incorrect paraphrases**. Authoritative two-track schedule (Show Up + Value Post, exact MYT times) is in [[wiki/sources/2026-07-07-whatsapp-community-sop-dr-jasmine-show-up-reference]] from saved SOP screenshots.
+§6 vague event-day timings replaced by [[wiki/sources/2026-07-07-whatsapp-community-sop-dr-jasmine-show-up-reference]].
 
-## Open questions (resolved for build — see 2026-07-07 planning)
+## Resolved open questions (raw §9)
 
-- Template library: **yes** (named SOP slots per project)
-- Reminder caption: **optional on images only**
-- Stickers: **static WebP only**
-- Event chips: **on Schedule screen**; start + end datetimes; see [[wiki/concepts/campaign-message-schedule]]
+| Raw question | Resolution |
+|--------------|------------|
+| Template picker vs upload | **Template library** (6 slots) in Settings |
+| Reminder caption | **Required** on IMAGE slots (templated); TEXT for LIVE NOW; none on STICKER |
+| API enum migration | `operatorKind` + formats; keep legacy `POST`/`POLL` |
+| Sticker bucket | Same bucket; prefix `stickers/` |
+
+## Wiki integration
+
+- [[wiki/overview]]
+- [[wiki/analysis/p7-ux-spec]]
+- [[wiki/analysis/p7-implementation-plan]]
+- [[wiki/concepts/value-vs-reminder-messages]]
+- [[wiki/concepts/wa-connection-pool]]

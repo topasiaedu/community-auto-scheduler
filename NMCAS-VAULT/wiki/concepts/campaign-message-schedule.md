@@ -1,8 +1,8 @@
 ---
 title: "Campaign message schedule (SOP slots)"
 type: "concept"
-updated: "2026-07-07"
-sources: 1
+updated: "2026-07-08"
+sources: 2
 tags: ["nmcas", "sop", "product", "scheduling", "campaign"]
 ---
 
@@ -12,29 +12,29 @@ tags: ["nmcas", "sop", "product", "scheduling", "campaign"]
 
 WhatsApp community campaigns follow a **named playbook** of message slots — each with a **trigger** (day + clock time) and a **content shape**. The reference SOP (Dr Jasmine Show Up) splits messages into two tracks that map directly to NMCAS operator kinds: see [[wiki/concepts/value-vs-reminder-messages]].
 
-This concept is **project-agnostic**; each Project stores its own assets/times in the **Reminder template library**.
+This concept is **project-agnostic**; each Project stores its own assets in the **Reminder template library**. **Clock times are fixed** (not editable by interns); see [[wiki/analysis/p7-ux-spec]].
 
 ## Two tracks
 
 | SOP track | NMCAS kind | What |
 |-----------|------------|------|
 | **Show Up** | **Reminder** | Fixed attendance sequence (welcome, countdowns, starting soon, live, sticker) |
-| **Value Post** | **Value** | Fresh content posts (separate Value Post SOP) |
+| **Value Post** | **Value** | Fresh content posts |
 
 ## Reference schedule (Dr Jasmine Show Up)
 
-From [[wiki/sources/2026-07-07-whatsapp-community-sop-dr-jasmine-show-up-reference]]. All times **MYT (GMT+8)**. Webinar start ≈ 8:00 PM.
+From [[wiki/sources/2026-07-07-whatsapp-community-sop-dr-jasmine-show-up-reference]]. All times **MYT (GMT+8)**.
 
 ### Show Up (Reminders)
 
 | # | Slot | Day | Time | Content |
 |---|------|-----|------|---------|
-| 01 | Welcome | −4 days | 3:00 PM | Welcome image + copy |
-| 02 | 2-Day Countdown | −2 days | 3:00 PM | Countdown image |
-| 03 | 1-Day Countdown | −1 day | 8:00 PM | Countdown image |
-| 04 | Starting Soon | day 0 | 11:00 AM | "Starting soon" image |
-| 05 | LIVE NOW | day 0 | 7:58 PM (start − 2 min) | Live link message |
-| 06 | Sticker | day 0 | 8:18 PM (start + 18 min) | Sticker (no caption) |
+| 01 | Welcome | −4 days | 3:00 PM | Image + templated caption |
+| 02 | 2-Day Countdown | −2 days | 3:00 PM | Image + templated caption |
+| 03 | 1-Day Countdown | −1 day | 8:00 PM | Image + templated caption |
+| 04 | Starting Soon | day 0 | 11:00 AM | Image + templated caption |
+| 05 | LIVE NOW | day 0 | start − 2 min | Text only (join link) |
+| 06 | Sticker | day 0 | start + 18 min | Sticker (no caption) |
 
 ### Value Post (Value)
 
@@ -44,16 +44,14 @@ From [[wiki/sources/2026-07-07-whatsapp-community-sop-dr-jasmine-show-up-referen
 | Value Post 2 | −1 day | 11:00 AM | Morning of 1-day before |
 | Value Post 3 | +1 day | 11:00 AM | Post-webinar follow-up |
 
-## Trigger model (two anchors)
+**Alternate-day rule:** On other pre-webinar days not in fixed slots, optional Value posts every alternate day @ 11:00 — intern opts in at campaign Step 4 ([[wiki/analysis/p7-ux-spec]] §4).
 
-Triggers are **not** a single offset from one moment. They need two operator inputs on the Schedule screen:
+## Trigger model (two anchors)
 
 1. **Webinar date** (calendar day). Most slots = `webinarDate − N days @ fixed MYT clock time`.
 2. **Event start time** (clock). Only LIVE NOW and Sticker are minute-offsets from start (−2 min, +18 min).
 
-### Quick chips (derived)
-
-When the operator enters webinar date (and event start time), chips compute absolute `scheduledAt`:
+### Computed schedule (fixed — intern does not edit)
 
 | Chip | Formula |
 |------|---------|
@@ -63,17 +61,17 @@ When the operator enters webinar date (and event start time), chips compute abso
 | Starting Soon (day0 11AM) | webinarDate @ 11:00 |
 | LIVE NOW | eventStart − 2 min |
 | Sticker | eventStart + 18 min |
-| Value Post morning | chosen day @ 11:00 |
+| Value Post morning | fixed offsets @ 11:00 |
 
-Clock times (3 PM / 11 AM / 8 PM) are **fixed** per slot (owner decision 2026-07-07) — the intern does not edit them. They pick the webinar date + event start time and each slot fires at its SOP-defined clock time automatically. (Cross-project variation, if ever needed, is a future concern; V1 bakes the SOP times in.)
+Clock times are **baked into** `ReminderTemplate` seed data and `campaignSchedule.ts`. Cross-project time variation is out of scope for v1.
 
 ## NMCAS default template slots
 
-A new project's Reminder template library should seed these named slots (assets + default day/time, all editable):
+Seeded on project create (assets uploaded in Settings):
 
-`Welcome`, `2-Day Countdown`, `1-Day Countdown`, `Starting Soon`, `Live Now`, `Post-Live Sticker`.
+`welcome`, `countdown_2d`, `countdown_1d`, `starting_soon`, `live_now`, `post_live_sticker`.
 
-Value Posts are authored fresh (not templated assets), but the schedule slots (−3d, −1d, +1d mornings) can be suggested.
+Value Posts are authored fresh per campaign (not templated).
 
 ## Corrections (2026-07-07)
 
@@ -82,6 +80,7 @@ Earlier notes fabricated "10:00 AM / 1 hour before / 2 hours after end". The sav
 ## See also
 
 - [[wiki/concepts/value-vs-reminder-messages]]
+- [[wiki/analysis/p7-ux-spec]]
+- [[wiki/analysis/p7-implementation-plan]]
 - [[wiki/entities/scheduled-message]]
 - [[wiki/sources/2026-07-07-whatsapp-community-sop-dr-jasmine-show-up-reference]]
-- [[wiki/overview]]

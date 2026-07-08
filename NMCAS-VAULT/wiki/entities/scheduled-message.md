@@ -1,7 +1,7 @@
 ---
 title: "Entity: ScheduledMessage"
 type: "entity"
-updated: "2026-07-07"
+updated: "2026-07-08"
 sources: 3
 tags: ["entity", "nmcas", "data-model"]
 ---
@@ -12,145 +12,107 @@ tags: ["entity", "nmcas", "data-model"]
 
 A **ScheduledMessage** is a unit of work: one message destined for one WhatsApp group (or community Announcements channel) at one specific datetime. It belongs to a Project.
 
-**Operator model (planned):** Value post vs Reminder — see [[wiki/concepts/value-vs-reminder-messages]]. Current schema still uses `POST` / `POLL` only.
+**Operator model (P7):** Value post vs Reminder — see [[wiki/concepts/value-vs-reminder-messages]]. Schema adds `operatorKind`, `valueFormat`, `reminderFormat`; legacy `POST` / `POLL` retained for backfill.
 
-## Schema (Prisma)
+## Schema (Prisma — current + P7)
 
 ```prisma
-enum MessageType {
-  POST
-  POLL
-}
-
-enum MessageStatus {
-  PENDING
-  SENDING
-  SENT
-  FAILED
-  DRAFT
-  CANCELLED
-}
+enum MessageType { POST POLL }           // legacy
+enum OperatorKind { VALUE REMINDER }     // P7
+enum ValueFormat { IMAGE_CAPTION TEXT_ONLY POLL }
+enum ReminderFormat { IMAGE TEXT STICKER }
 
 model ScheduledMessage {
-  id              String        @id @default(cuid())
-  projectId       String
-  project         Project       @relation(fields: [projectId], references: [id])
+  id                  String        @id @default(cuid())
+  projectId           String
+  project             Project       @relation(...)
 
-  groupJid        String        // WA group JID e.g. 1234567890@g.us
-  groupName       String        // Snapshot of display name at scheduling time
+  groupJid            String
+  groupName           String
 
-  type            MessageType
+  type                MessageType   // legacy; backfilled from operatorKind
+  operatorKind        OperatorKind?
+  valueFormat         ValueFormat?
+  reminderFormat      ReminderFormat?
 
-  // POST fields
-  copyText        String?
-  imageUrl        String?       // Supabase Storage object path (private bucket)
+  copyText            String?
+  imageUrl            String?
+  stickerUrl          String?       // P7 — Reminder STICKER snapshot
+  pollQuestion        String?
+  pollOptions         String[]
+  pollMultiSelect     Boolean       @default(false)
 
-  // POLL fields
-  pollQuestion    String?
-  pollOptions     String[]
-  pollMultiSelect Boolean       @default(false)
+  reminderTemplateId  String?       // P7
+  campaignId          String?       // P7 — null for single-message rows
 
-  scheduledAt     DateTime      // stored as UTC
-  status          MessageStatus @default(PENDING)
-  sentAt          DateTime?
-  error           String?
-  pgBossJobId     String?       // ID of the active pg-boss job for this row
-
-  createdByUserId String?       // Supabase auth.uid at scheduling time
-  createdAt       DateTime      @default(now())
+  scheduledAt         DateTime      // UTC
+  status              MessageStatus @default(PENDING)
+  sentAt              DateTime?
+  error               String?
+  pgBossJobId         String?
+  createdByUserId     String?
+  createdAt           DateTime      @default(now())
 }
 ```
 
 ## Field notes
 
-- `groupJid` and `groupName` are snapshotted at scheduling time. History remains readable even if the group is renamed or left later.
-- `imageUrl` is a Supabase Storage **object path** (not a public URL). The worker downloads it at send time via `supabase.storage.from(bucket).download(path)`.
-- `scheduledAt` is always UTC in the DB. The UI converts to MYT (UTC+8) for display and input.
-- `pollOptions` max 12 elements (WhatsApp native poll limit).
-- `error` holds the last error message when `status = FAILED`. On timeout it reads: _"WhatsApp send timed out after 120s — the message may already have been delivered. Check the group and use Re-queue if it was not sent."_
-- `pgBossJobId` is set when a pg-boss job is created/re-queued. The rescue sweep uses this to check job liveness before re-enqueueing.
+- `groupJid` / `groupName` snapshotted at schedule time.
+- `imageUrl`, `stickerUrl` are Supabase Storage paths; worker downloads at send.
+- `copyText` on Reminder rows = **merged snapshot** of `bodyTemplate` + campaign Custom Values at schedule time.
+- `scheduledAt` stored UTC; UI displays MYT.
+- `campaignId` links rows from one campaign wizard run; used for Queue grouping.
 
 ## Status lifecycle
 
 ```
-          ┌── Edit ──────────────────────────────────────────────────┐
-          │                                                           ↓
-DRAFT ────┤── Publish ──► PENDING ──► SENDING ──► SENT              
-          │                   │           │
-          └── Discard ──►     │           └──► FAILED ──► Re-queue ──┐
-                              │                                       │
-                         CANCELLED                               PENDING
+DRAFT → PENDING → SENDING → SENT
+              ↓         ↓
+         CANCELLED   FAILED → re-queue → PENDING
 ```
 
-| Status | Meaning |
-|---|---|
-| `DRAFT` | Partially composed, not yet scheduled. No pg-boss job. |
-| `PENDING` | Scheduled; pg-boss job exists and will fire at `scheduledAt`. |
-| `SENDING` | Worker picked up job, CAS succeeded, WA send in progress. |
-| `SENT` | WA ACK received; `sentAt` populated. Terminal. |
-| `FAILED` | Send failed or timed out. `error` field describes reason. Re-queueable. |
-| `CANCELLED` | User cancelled before send. Terminal. |
+See [[wiki/concepts/pg-boss-scheduler]] for rescue sweep and re-queue rules.
 
-## Status transition rules (API-enforced)
+## P7 send routing (worker)
 
-| Transition | Route |
-|---|---|
-| DRAFT → PENDING | `PATCH /messages/:id` with `publish: true` |
-| PENDING → DRAFT | `POST /messages/:id/draft` |
-| PENDING/DRAFT → CANCELLED | `POST /messages/:id/cancel` |
-| PENDING/SENDING/FAILED → PENDING | `POST /messages/:id/requeue` |
-| PENDING → SENDING | Worker CAS (`updateMany WHERE status='PENDING'`) |
-| SENDING → SENT | Worker (`updateMany WHERE status='SENDING'`) |
-| PENDING/SENDING → FAILED | Worker on error/timeout |
+| operatorKind | format | Send |
+|--------------|--------|------|
+| VALUE | POLL | `sendGroupPoll` |
+| VALUE | TEXT_ONLY | `sendGroupText` |
+| VALUE | IMAGE_CAPTION | `sendGroupImage` |
+| REMINDER | TEXT | `sendGroupText` |
+| REMINDER | IMAGE | `sendGroupImage` (caption required for SOP image slots) |
+| REMINDER | STICKER | `sendGroupSticker` + `messageSecret` |
 
-## Re-queue behaviour
+Legacy: if `operatorKind` null, fall back to `type` POST/POLL.
 
-`POST /messages/:id/requeue`:
-- Allowed for `PENDING`, `SENDING` (if `scheduledAt < now - 5min`), and `FAILED`.
-- **SENDING < 5 min old → 409:** Worker may still be mid-send; forcing a requeue would duplicate the message.
-- **FAILED re-queue:** UI requires confirmation — "Only re-queue if the message was NOT sent to the group." The 120s timeout FAILED status means the message _may_ have been delivered.
+## Campaign vs single
 
-## Rescue sweep interaction
+| Source | campaignId | Typical count |
+|--------|------------|---------------|
+| Campaign wizard | set | 6 Reminders + (3 + optional) × N communities |
+| Single message | null | 1 |
 
-The background rescue sweep (`rescue-sweep.ts`) auto-re-enqueues rows without needing user action:
-- PENDING rows overdue by >10s with no live pg-boss job.
-- SENDING rows overdue by >10min with no live pg-boss job (worker crash recovery).
+Post-confirm campaign rows are edited only via per-row Queue actions (cancel, re-queue, draft) — no bulk campaign edit in v1.
 
-## Planned extensions (build in progress — not in schema yet)
-
-| Need | Direction |
-|------|-----------|
-| Value vs Reminder | `operatorKind` + `valueFormat` / `reminderMediaKind` (keep legacy `POST`/`POLL` during migration) |
-| Value sub-format | `image_caption` \| `poll` \| `text_only` |
-| Reminder sticker | `stickerUrl` (static WebP); `stickerMessage` + `messageSecret` |
-| Reminder SOP image | `imageUrl`; `copyText` optional (caption allowed on images only) |
-| Reminder text | `copyText` only (e.g. LIVE NOW join link); no media. `reminderMediaKind` needs a `TEXT` value (or `reminderFormat` enum: `IMAGE`\|`STICKER`\|`TEXT`) |
-| Per-project templates | `ReminderTemplate` model — named SOP slots (Welcome, 2d, 1d, …) |
-| Event datetime chips | Schedule UI helper: see [[wiki/concepts/campaign-message-schedule]] |
-
-### Event-relative chips (from SOP reference)
-
-Two anchors on the Schedule screen: **webinar date** + **event start time** (MYT). Slot clock times are **fixed** (intern does not edit them).
+## Event-relative schedule (fixed clocks)
 
 | Chip | `scheduledAt` |
 |------|----------------|
-| Welcome | webinarDate − 4d @ 15:00 |
+| Welcome | webinarDate − 4d @ 15:00 MYT |
 | 2-Day Countdown | webinarDate − 2d @ 15:00 |
 | 1-Day Countdown | webinarDate − 1d @ 20:00 |
 | Starting Soon | webinarDate @ 11:00 |
 | LIVE NOW | eventStart − 2 min |
 | Post-Live Sticker | eventStart + 18 min |
-| Value Post | chosen day @ 11:00 |
+| Value 1/2/3 | −3d / −1d / +1d @ 11:00 |
 
-Full two-track schedule (Show Up + Value Post): see [[wiki/concepts/campaign-message-schedule]].
+Full spec: [[wiki/concepts/campaign-message-schedule]], [[wiki/analysis/p7-ux-spec]].
 
 ## See also
 
-- [[wiki/concepts/campaign-message-schedule]]
+- [[wiki/analysis/p7-implementation-plan]]
+- [[wiki/analysis/p7-ux-spec]]
 - [[wiki/concepts/value-vs-reminder-messages]]
-- [[wiki/sources/2026-07-07-whatsapp-community-sop-dr-jasmine-show-up-reference]]
-- [[wiki/sources/2026-07-06-whatsmeow-deploy-product-ux-session]]
 - [[wiki/entities/project]]
 - [[wiki/concepts/pg-boss-scheduler]]
-- [[wiki/concepts/wa-connection-pool]]
-- [[wiki/sources/2026-04-21-stability-hardening-session]]

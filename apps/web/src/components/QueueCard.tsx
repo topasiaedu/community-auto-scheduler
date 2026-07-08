@@ -1,6 +1,6 @@
 /**
  * Individual scheduled-send row with status accent stripe, chevron expand,
- * and inline cancel confirmation. Uses shadcn Badge, Button.
+ * kind badges, inline preview, and inline cancel confirmation.
  */
 
 import { useEffect, useState, type ReactElement } from "react";
@@ -15,6 +15,8 @@ import {
 import { cn } from "@/lib/utils";
 import { utcIsoToDatetimeLocalMyt } from "../myt.js";
 import { MessagePreview } from "./MessagePreview.js";
+import { QueueMessagePreview } from "./QueueMessagePreview.js";
+import { kindBadgeLabel, subBadgeLabel } from "../lib/queueLabels.js";
 import {
   formatAttributedBy,
   formatRelativeTime,
@@ -55,6 +57,16 @@ function statusBadgeVariant(status: string): "default" | "secondary" | "destruct
   }
 }
 
+function kindBadgeClass(message: ScheduledMessage): string {
+  if (message.operatorKind === "REMINDER") {
+    return "bg-sky-50 text-sky-700 border-sky-200";
+  }
+  if (message.operatorKind === "VALUE") {
+    return "bg-emerald-50 text-emerald-700 border-emerald-200";
+  }
+  return "bg-indigo-50 text-indigo-700 border-indigo-200";
+}
+
 type QueueCardProps = {
   message: ScheduledMessage;
   vm: NmcasViewModel;
@@ -76,8 +88,13 @@ export function QueueCard({ message: m, vm }: QueueCardProps): ReactElement {
     onStartEditPending,
     onContinueDraft,
     session,
-    fetchPostImageObjectUrl,
+    fetchMediaObjectUrl,
   } = vm;
+
+  const previewMediaPath =
+    m.reminderFormat === "STICKER" && m.stickerUrl !== null && m.stickerUrl !== undefined
+      ? m.stickerUrl
+      : m.imageUrl;
 
   useEffect(() => {
     if (!previewOpen) {
@@ -89,11 +106,11 @@ export function QueueCard({ message: m, vm }: QueueCardProps): ReactElement {
       });
       return;
     }
-    if (m.type !== "POST" || m.imageUrl === null || m.imageUrl.length === 0) {
+    if (previewMediaPath === null || previewMediaPath.length === 0) {
       return;
     }
     let cancelled = false;
-    void fetchPostImageObjectUrl(m.imageUrl).then((url) => {
+    void fetchMediaObjectUrl(previewMediaPath).then((url) => {
       if (!cancelled && url !== null) {
         setPreviewImageSrc(url);
       }
@@ -101,27 +118,35 @@ export function QueueCard({ message: m, vm }: QueueCardProps): ReactElement {
     return () => {
       cancelled = true;
     };
-  }, [previewOpen, m.type, m.imageUrl, fetchPostImageObjectUrl]);
+  }, [previewOpen, previewMediaPath, fetchMediaObjectUrl]);
 
   const isExpanded = expandedMessageId === m.id;
   const isConfirmingCancel = cancelConfirmId === m.id;
   const attribution = formatAttributedBy(m.createdByUserId, session?.user.id);
   const canCancel = m.status === "PENDING" || m.status === "DRAFT";
   const groupDisplayName = stripCommunityShellPrefix(m.groupName);
+  const kindLabel = kindBadgeLabel(m);
+  const subLabel = subBadgeLabel(m);
 
   return (
     <li className="flex overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-      {/* Left accent stripe */}
       <div className={cn("w-1 flex-shrink-0", accentClass(m.status))} aria-hidden="true" />
 
       <div className="flex-1 min-w-0 p-4">
-        {/* Header row */}
         <div className="flex items-start justify-between gap-2">
           <div className="flex flex-wrap items-center gap-1.5 flex-1 min-w-0">
             <span className="font-semibold text-sm truncate">{groupDisplayName}</span>
-            <Badge variant="outline" className="text-[11px] px-1.5 py-0 bg-indigo-50 text-indigo-700 border-indigo-200">
-              {m.type === "POLL" ? "Poll" : "Post"}
+            <Badge
+              variant="outline"
+              className={cn("text-[11px] px-1.5 py-0", kindBadgeClass(m))}
+            >
+              {kindLabel}
             </Badge>
+            {subLabel !== null ? (
+              <Badge variant="secondary" className="text-[11px] px-1.5 py-0">
+                {subLabel}
+              </Badge>
+            ) : null}
             <Badge
               variant={statusBadgeVariant(m.status)}
               className={cn(
@@ -145,30 +170,30 @@ export function QueueCard({ message: m, vm }: QueueCardProps): ReactElement {
             >
               Preview
             </Button>
-          <button
-            type="button"
-            className={cn(
-              "text-muted-foreground text-lg leading-none transition-transform flex-shrink-0 hover:text-foreground",
-              isExpanded && "rotate-90",
-            )}
-            aria-expanded={isExpanded}
-            aria-label={isExpanded ? "Collapse" : "Expand"}
-            onClick={() =>
-              setExpandedMessageId((id) => (id === m.id ? null : m.id))
-            }
-          >
-            ›
-          </button>
+            <button
+              type="button"
+              className={cn(
+                "text-muted-foreground text-lg leading-none transition-transform flex-shrink-0 hover:text-foreground",
+                isExpanded && "rotate-90",
+              )}
+              aria-expanded={isExpanded}
+              aria-label={isExpanded ? "Collapse" : "Expand"}
+              onClick={() =>
+                setExpandedMessageId((id) => (id === m.id ? null : m.id))
+              }
+            >
+              ›
+            </button>
           </div>
         </div>
 
-        {/* Time + attribution */}
         <div className="mt-1.5 flex items-center gap-2 text-xs text-muted-foreground">
           <span className="font-medium text-foreground/80">{formatRelativeTime(m.scheduledAt)}</span>
           {attribution.length > 0 ? <span>· {attribution}</span> : null}
         </div>
 
-        {/* Expanded detail */}
+        <QueueMessagePreview message={m} fetchMediaUrl={fetchMediaObjectUrl} />
+
         {isExpanded ? (
           <div className="mt-3 rounded-lg bg-muted/50 p-3 text-sm leading-relaxed">
             {m.type === "POLL" && m.pollQuestion !== null ? (
@@ -184,8 +209,10 @@ export function QueueCard({ message: m, vm }: QueueCardProps): ReactElement {
             {m.type !== "POLL" && m.copyText !== null && m.copyText.length > 0 ? (
               <p className="whitespace-pre-wrap">{m.copyText}</p>
             ) : null}
-            {m.type !== "POLL" && m.imageUrl !== null ? (
-              <p className="text-xs text-muted-foreground mt-1">📎 Image attached</p>
+            {previewMediaPath !== null && previewMediaPath.length > 0 ? (
+              <p className="text-xs text-muted-foreground mt-1">
+                {m.reminderFormat === "STICKER" ? "Sticker attached" : "Image attached"}
+              </p>
             ) : null}
             {m.error !== null ? (
               <p className="mt-2 text-xs text-destructive">{m.error}</p>
@@ -193,12 +220,10 @@ export function QueueCard({ message: m, vm }: QueueCardProps): ReactElement {
           </div>
         ) : null}
 
-        {/* Inline error preview for failed */}
         {m.status === "FAILED" && !isExpanded && m.error !== null ? (
           <p className="mt-1 text-xs text-destructive truncate">{m.error}</p>
         ) : null}
 
-        {/* Actions */}
         {m.status === "FAILED" && !requeueConfirming ? (
           <div className="mt-3 flex gap-2">
             <Button
@@ -327,13 +352,13 @@ export function QueueCard({ message: m, vm }: QueueCardProps): ReactElement {
               <DialogTitle>Message preview</DialogTitle>
             </DialogHeader>
             <MessagePreview
-              kind={m.type === "POLL" ? "POLL" : "POST"}
+              kind={m.type === "POLL" || m.valueFormat === "POLL" ? "POLL" : "POST"}
               groupTitle={groupDisplayName}
               copyText={m.copyText ?? ""}
               pollQuestion={m.pollQuestion ?? ""}
               pollOptions={m.pollOptions ?? []}
               pollMultiSelect={m.pollMultiSelect}
-              imageSrc={m.type === "POST" ? previewImageSrc : null}
+              imageSrc={previewImageSrc}
               scheduledLocal={utcIsoToDatetimeLocalMyt(m.scheduledAt)}
             />
           </DialogContent>

@@ -1,8 +1,8 @@
 ---
 title: "Value post vs Reminder (operator message model)"
 type: "concept"
-updated: "2026-07-07"
-sources: 1
+updated: "2026-07-08"
+sources: 2
 tags: ["nmcas", "product", "whatsapp", "sop", "ux"]
 ---
 
@@ -12,77 +12,75 @@ tags: ["nmcas", "product", "whatsapp", "sop", "ux"]
 
 NMCAS schedules WhatsApp community sends using two **operator-facing** kinds. The split is based on **how content is produced**, not on file format. Applies to **every Project** (multi-campaign); each project has its own SOP assets and copy.
 
+**Authoritative UX:** [[wiki/analysis/p7-ux-spec]].
+
 ## Value post
 
 **Fresh content written for each campaign.**
 
-| Format | Use | Fields |
-|--------|-----|--------|
-| **Image + caption** | Default; most common | Custom image + authored caption |
-| **Poll** | Occasional engagement | Question + 2–12 options (under Value, not top-level) |
-| **Text only** | Rare long text without image | Caption only |
+| Format | Use | Fields | Campaign wizard |
+|--------|-----|--------|-----------------|
+| **Image + caption** (`IMAGE_CAPTION`) | Default; fixed Value slots | `imageUrl` + `copyText` | **Yes** (3 fixed + optional alternates) |
+| **Poll** (`POLL`) | Occasional engagement | poll fields | **No** — single-message only |
+| **Text only** (`TEXT_ONLY`) | Rare | `copyText` | **No** — single-message only |
 
 Intern rule: *"We're writing something new → Value."*
 
 ## Reminder
 
-**Anything predefined in the project SOP / asset pack.**
+**Anything predefined in the project SOP / asset pack** — templates in Settings, merged with campaign Custom Values.
 
-| Format | Typical use | Caption |
-|--------|-------------|---------|
-| **Image** (`imageMessage`) | Countdown/welcome/starting-soon graphics | Usually none — text on graphic; caption **optional** |
-| **Sticker** (`stickerMessage`, WebP) | Event-day stickers | **None** (never) |
-| **Text** (`conversation`) | LIVE NOW link message | The playbook link/copy (fixed) |
+| Format | Typical use | Caption / body |
+|--------|-------------|----------------|
+| **IMAGE** | Welcome, 2-Day, 1-Day, Starting Soon | **Required** — long templated caption merged from `bodyTemplate` + Custom Values |
+| **TEXT** | LIVE NOW join link | **Required** — short templated text only; **no image** |
+| **STICKER** | Post-live sticker (WebP) | **Never** — asset only |
 
 **Countdown graphics are Reminders**, not Value posts — even when they are full branded images.
-
-A Reminder can be an **image, a sticker, or plain text** (e.g. the fixed LIVE NOW join-link message). What makes it a Reminder is that it is **predefined in the SOP playbook**, not the media type.
 
 Intern rule: *"It's in the SOP playbook → Reminder."*
 
 ## WhatsApp constraints
 
 - Prefer **one media per scheduled row** for community Announcements.
-- Sticker + long caption in one message is avoided; schedule separate rows if SOP needs asset + link text.
-- Community sends require **`messageSecret`** (whatsmeow-node) for reactions compatibility.
+- Sticker + caption in one message is avoided.
+- Community sends require **`messageSecret`** (whatsmeow-node).
 
-## Implementation status (2026-07-06)
+## Implementation status (2026-07-08)
 
 | Area | Status |
 |------|--------|
-| Operator model | **Decided** |
-| DB `MessageType` (`POST` / `POLL`) | **Legacy** — migration TBD |
-| Sticker send + Reminder UI | **Not built** |
-| Per-project SOP template library | **Later** — v1 likely upload-only |
+| Operator model | **Locked** — see P7 plan |
+| DB `MessageType` (`POST` / `POLL`) | **Legacy** — backfill to `operatorKind` |
+| Sticker send + Reminder UI | **Planned P7** |
+| Per-project template library (6 slots) | **Planned P7 Phase 4** |
+| Campaign wizard | **Planned P7 Phase 5** — see [[wiki/analysis/p7-ux-spec]] |
 
-## Planned UX (summary)
+## UX (locked)
 
-- Compose top-level: **Value post** | **Reminder**
-- Value sub-formats: Image+caption | Poll | Text only
-- Reminder: pick/upload SOP asset only; checkered sticker preview
-- Confirm modal before schedule; queue badges show kind + sub-format
+- Nav: Queue / Schedule / WhatsApp / Settings
+- Schedule: **Campaign** wizard (primary) + **Single message** escape hatch
+- Settings: 6-slot Reminder template library + SOP URL
+- Queue: badges `Reminder · {slot}` / `Value · Image`; campaign grouping
+- Confirm modal before schedule (campaign + single)
 
-## SOP track mapping (example)
+> **Supersedes** [[wiki/sources/2026-07-06-whatsmeow-deploy-product-ux-session]] §5.2–5.3 where they conflict (one-page-only Schedule, "no caption" on Reminders). Campaign setup uses a **5-step wizard**; image Reminders **require** templated captions.
 
-The reference SOP uses two tracks that map 1:1 to this model — see [[wiki/concepts/campaign-message-schedule]] for exact times:
+## SOP track mapping
+
+See [[wiki/concepts/campaign-message-schedule]] for exact times:
 
 | SOP track / slot | Kind | Format |
 |------------------|------|--------|
-| **Show Up:** Welcome | Reminder | Image + copy |
-| **Show Up:** 2-Day / 1-Day Countdown | Reminder | Image |
-| **Show Up:** Starting Soon | Reminder | Image |
-| **Show Up:** LIVE NOW (live link) | Reminder | **Text only** (join link; no image) |
-| **Show Up:** Post-Live Sticker | Reminder | Sticker (no caption) |
-| **Value Post** ×3 | Value | Image + caption |
-| Mid-campaign teaching, polls | Value | — |
-
-**Reminder IMAGE** may include an **optional caption** (e.g. LIVE NOW link text). **Reminder STICKER** never has a caption.
+| Welcome, 2-Day, 1-Day, Starting Soon | Reminder | IMAGE + caption |
+| LIVE NOW | Reminder | TEXT only |
+| Post-Live Sticker | Reminder | STICKER |
+| Value Post ×3 | Value | IMAGE_CAPTION |
 
 ## See also
 
 - [[wiki/concepts/campaign-message-schedule]]
-- [[wiki/overview]]
+- [[wiki/analysis/p7-implementation-plan]]
+- [[wiki/analysis/p7-ux-spec]]
 - [[wiki/entities/scheduled-message]]
-- [[wiki/sources/2026-07-06-whatsmeow-deploy-product-ux-session]]
 - [[wiki/sources/2026-07-07-whatsapp-community-sop-dr-jasmine-show-up-reference]]
-- [[wiki/concepts/multi-project-architecture]]

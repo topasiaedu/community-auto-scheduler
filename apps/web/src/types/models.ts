@@ -41,8 +41,16 @@ export type ScheduledMessage = {
   groupJid: string;
   groupName: string;
   type: string;
+  operatorKind?: OperatorKind | null;
+  valueFormat?: ValueFormat | null;
+  reminderFormat?: ReminderFormat | null;
+  campaignId?: string | null;
+  campaignWebinarDate?: string | null;
+  reminderTemplateSlotKey?: string | null;
+  reminderTemplateName?: string | null;
   copyText: string | null;
   imageUrl: string | null;
+  stickerUrl?: string | null;
   pollQuestion: string | null;
   pollOptions: string[];
   pollMultiSelect: boolean;
@@ -53,11 +61,51 @@ export type ScheduledMessage = {
   createdByUserId?: string | null;
 };
 
+export type OperatorKind = "VALUE" | "REMINDER";
+
+export type ValueFormat = "IMAGE_CAPTION" | "TEXT_ONLY" | "POLL";
+
+export type SingleMessageKind = OperatorKind;
+
+/** @deprecated Legacy compose types — use OperatorKind / ValueFormat for new UI */
 export type MessageKind = "POST" | "POLL";
 
 export type ProjectRow = {
   id: string;
   name: string;
   description: string | null;
+  sopUrl: string | null;
+  campaignNote: string | null;
+};
+
+/** Eight merge fields from campaign setup (P7 UX spec §4 Step 1). */
+export type CampaignCustomValues = {
+  workshopDay: string;
+  workshopDate: string;
+  workshopTime: string;
+  zoomLink: string;
+  sessionDate: string;
+  sessionTime: string;
+  zoomId: string;
+  zoomPasscode: string;
+};
+
+export type ReminderFormat = "IMAGE" | "TEXT" | "STICKER";
+
+export type ScheduleRuleKind = "WEBINAR_DATE_OFFSET" | "EVENT_START_OFFSET";
+
+export type ReminderTemplateRow = {
+  id: string;
+  slotKey: string;
+  name: string;
+  reminderFormat: ReminderFormat;
+  mediaUrl: string | null;
+  stickerUrl: string | null;
+  bodyTemplate: string | null;
+  scheduleRuleKind: ScheduleRuleKind;
+  dayOffset: number | null;
+  clockTimeMyt: string | null;
+  startOffsetMinutes: number | null;
+  sortOrder: number;
 };
 

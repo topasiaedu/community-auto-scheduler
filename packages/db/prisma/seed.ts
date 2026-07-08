@@ -4,6 +4,7 @@
  */
 
 import { PrismaClient } from "@prisma/client";
+import { seedReminderTemplatesForProject } from "../src/reminderTemplateDefaults.js";
 
 const DEFAULT_PROJECT_ID = "nmcas-default-project";
 
@@ -21,6 +22,8 @@ async function main(): Promise<void> {
       name: "NMCAS",
     },
   });
+
+  await seedReminderTemplatesForProject(prisma, DEFAULT_PROJECT_ID);
 }
 
 void main()

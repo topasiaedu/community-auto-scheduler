@@ -151,6 +151,21 @@ export function useNmcasApp() {
     [authorizedFetch],
   );
 
+  const fetchMediaObjectUrl = useCallback(
+    async (storagePath: string): Promise<string | null> => {
+      if (storagePath.length === 0) {
+        return null;
+      }
+      const res = await authorizedFetch(`/uploads/media?path=${encodeURIComponent(storagePath)}`);
+      if (!res.ok) {
+        return null;
+      }
+      const blob = await res.blob();
+      return URL.createObjectURL(blob);
+    },
+    [authorizedFetch],
+  );
+
   const composeImageDisplayUrl = useMemo(
     () => imagePreviewObjectUrl ?? imageResolvedUrl,
     [imagePreviewObjectUrl, imageResolvedUrl],
@@ -977,6 +992,7 @@ export function useNmcasApp() {
     composeImageDisplayUrl,
     clearPostImage,
     fetchPostImageObjectUrl,
+    fetchMediaObjectUrl,
     pollQuestion,
     setPollQuestion,
     pollOptions,
@@ -994,6 +1010,7 @@ export function useNmcasApp() {
     waStatusUnavailable,
     canUseApiRoutes,
     selectedProjectName,
+    authorizedFetch,
     refreshWa,
     refreshQrFromServer,
     refreshGroups,
@@ -1014,6 +1031,7 @@ export function useNmcasApp() {
     onSubmitAuth,
     onSignOut,
     onCreateProject,
+    loadProjects,
     MIN_LEAD_SECONDS,
   };
 }

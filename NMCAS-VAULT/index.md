@@ -25,7 +25,7 @@ Catalog of all wiki pages. Updated after every ingest, filed query, or lint pass
 
 ## Concepts
 
-- [[wiki/concepts/campaign-message-schedule]] — SOP slot triggers (welcome on-join, countdowns, live, thank-you); event-relative chips.
+- [[wiki/concepts/campaign-message-schedule]] — SOP slot triggers (Show Up + Value Post); fixed MYT clocks; two anchors.
 - [[wiki/concepts/compounding-knowledge-base]] — LLM Wiki as persistent compiled layer; ingest / query / lint.
 - [[wiki/concepts/value-vs-reminder-messages]] — Operator model: Value post (fresh copy, poll nested) vs Reminder (SOP assets, stickers, countdowns).
 - [[wiki/concepts/multi-project-architecture]] — Project as top-level entity; how resources are scoped per project.
@@ -43,9 +43,10 @@ Catalog of all wiki pages. Updated after every ingest, filed query, or lint pass
 
 ## Meta
 
-- [[wiki/analysis/p7-implementation-plan]] — P7 build plan: campaign wizard, Custom Values, templates, phases 1–7.
+- [[wiki/analysis/p7-implementation-plan]] — P7 build plan: schema, API, worker, phases 1–7.
+- [[wiki/analysis/p7-ux-spec]] — P7 agent-ready UX + API: wizard, validation, contracts, acceptance matrix.
 - `CLAUDE.md` — Schema and agent rules (see vault root).
 
 ---
 
-*Last indexed: 2026-07-07 — P7 implementation plan filed.*
+*Last indexed: 2026-07-08 — P7 UX spec filed; wiki contradictions reconciled.*

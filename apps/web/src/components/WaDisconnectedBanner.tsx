@@ -20,7 +20,7 @@ export function WaDisconnectedBanner({ vm }: WaDisconnectedBannerProps): ReactEl
   if (vm.waConnected) {
     return null;
   }
-  if (location.pathname === "/connect") {
+  if (location.pathname === "/whatsapp" || location.pathname === "/connect") {
     return null;
   }
 
@@ -34,8 +34,8 @@ export function WaDisconnectedBanner({ vm }: WaDisconnectedBannerProps): ReactEl
   return (
     <div className="wa-banner" role="alert">
       <span className="wa-banner__text">{label}</span>
-      <Link to="/connect" className="wa-banner__link">
-        Go to Connect →
+      <Link to="/whatsapp" className="wa-banner__link">
+        Go to WhatsApp →
       </Link>
     </div>
   );

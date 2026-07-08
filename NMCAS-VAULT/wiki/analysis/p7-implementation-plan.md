@@ -10,6 +10,7 @@ tags: ["nmcas", "p7", "implementation", "product", "sop"]
 
 **Status:** Ready to build (decisions locked)  
 **Scope:** One complete delivery — intern-ready campaign scheduling end-to-end  
+**UX & API (agent-ready):** [[wiki/analysis/p7-ux-spec]] — wizard steps, validation, API JSON, acceptance matrix  
 **Ground truth:** [[wiki/sources/2026-07-07-whatsapp-community-sop-dr-jasmine-show-up-reference]], [[wiki/concepts/campaign-message-schedule]]
 
 ---
@@ -48,7 +49,7 @@ An intern can run a full WhatsApp community campaign without external docs:
 
 | Format | Fields | Caption |
 |--------|--------|---------|
-| `IMAGE` | `imageUrl` + `copyText` | Required for Welcome / countdowns / Starting Soon; optional elsewhere |
+| `IMAGE` | `imageUrl` + `copyText` | **Required** for Welcome / 2-Day / 1-Day / Starting Soon (templated caption) |
 | `TEXT` | `copyText` only | LIVE NOW |
 | `STICKER` | `stickerUrl` | Never |
 
@@ -122,36 +123,14 @@ All times **MYT**. See [[wiki/concepts/campaign-message-schedule]].
 
 ## 4. UX
 
-### Nav & routes
+**Full spec:** [[wiki/analysis/p7-ux-spec]] (wizard steps, validation, API contracts, Queue badges, Settings layout, mobile/a11y).
 
-- **Queue** `/queue` — home
-- **Schedule** `/schedule` — campaign + single message (`/compose` redirect)
-- **WhatsApp** `/whatsapp` — link WA (`/connect` redirect)
-- **Settings** — SOP URL, campaign note, template library
+Summary:
 
-### Schedule — two modes
-
-**A. Campaign setup (primary)**
-
-1. **Custom Values** (8 fields) + webinar date + event start time
-2. **Reminder destination** — pick ONE community + channel (e.g. 3.0 › Announcements); applies to all Show Up rows
-3. **Show Up review** — 6 slots, computed times, template assets ✓/missing, merged copy preview
-4. **Value posts** — 3 fixed rows (+ optional alternate-day suggestions); image + caption each; **broadcast to all communities** (fan-out preview: "×N communities")
-5. **Confirm** → bulk create rows + enqueue
-
-**B. Single message (escape hatch)**
-
-Where → Value|Reminder → Content → When + confirm modal
-
-### Settings — template library
-
-Seed 6 slots per project: `welcome`, `countdown_2d`, `countdown_1d`, `starting_soon`, `live_now`, `post_live_sticker`.
-
-Each stores: format, image/sticker asset, **`bodyTemplate`** (with placeholders), default schedule rule (fixed; not user-editable).
-
-### Queue
-
-Badges: `Reminder · Welcome`, `Value · Image`, etc. Campaign grouping. Previews for image/sticker/text/poll.
+- Nav: Queue `/queue`, Schedule `/schedule`, WhatsApp `/whatsapp`, Settings `/settings` (legacy `/compose`, `/connect` redirect)
+- Schedule: segmented **Campaign** (5-step wizard) | **Single message** (4-block one-pager)
+- Settings: SOP URL, campaign note, 6-slot Reminder template library
+- Queue: campaign grouping, kind badges, sticker checkered preview
 
 ---
 
@@ -199,13 +178,16 @@ ScheduledMessage (extend)
 
 | Area | Routes |
 |------|--------|
-| Templates | `GET/PATCH /templates`, upload asset per `slotKey` |
-| Campaign | `POST /campaigns/schedule` — 6 Reminders → `reminderGroupJid`; each Value slot → fan out to all community Announcements channels |
+| Templates | `GET/PATCH /templates/:slotKey`, upload asset per `slotKey` |
+| Campaign | `POST /campaigns/schedule` — transactional bulk create |
+| Projects | `PATCH /projects/:id` — `sopUrl`, `campaignNote` |
 | Messages | Extended create/patch validation on `operatorKind` + formats |
 | Uploads | `POST /uploads/media?kind=post\|reminder-image\|sticker` |
 | Media | `GET /uploads/media?path=...` |
 
 **Merge helper:** `mergeTemplate(customValues, bodyTemplate) → string` (pure function, unit-tested).
+
+**Request/response shapes, fan-out resolver, error codes:** [[wiki/analysis/p7-ux-spec]] §9–10.
 
 ---
 
@@ -269,8 +251,9 @@ Legacy fallback on `type` POST/POLL if `operatorKind` null.
 
 ### Phase 7 — Test & harden
 
-- Manual acceptance matrix (9 core sends + timing table)
+- Manual acceptance matrix — [[wiki/analysis/p7-ux-spec]] §11
 - Edge cases: animated WebP reject, template delete after schedule, legacy rows, FAILED re-queue
+- Production smoke: Render API health + Vercel web + browser E2E on test project
 
 ### Agent execution order (parallel vs sequential)
 
@@ -298,6 +281,7 @@ Legacy fallback on `type` POST/POLL if `operatorKind` null.
 
 ## See also
 
+- [[wiki/analysis/p7-ux-spec]] — **agent-ready UX + API**
 - [[wiki/concepts/campaign-message-schedule]]
 - [[wiki/concepts/value-vs-reminder-messages]]
 - [[wiki/entities/scheduled-message]]

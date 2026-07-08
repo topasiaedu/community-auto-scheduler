@@ -16,6 +16,7 @@ export default defineConfig(({ mode }) => {
   const apiPort = env.PORT !== undefined && env.PORT.trim().length > 0 ? env.PORT.trim() : "3001";
 
   return {
+    envDir: monorepoRoot,
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {

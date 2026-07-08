@@ -1,5 +1,6 @@
 /**
- * Scheduled messages: create (enqueue), list, cancel, draft, update draft / publish — POST and POLL.
+ * Scheduled messages: create (enqueue), list, cancel, draft, update draft / publish.
+ * Supports legacy POST/POLL and P7 operatorKind (VALUE / REMINDER) formats.
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -7,10 +8,16 @@ import PgBoss from "pg-boss";
 import { z } from "zod";
 import type { PrismaClient } from "@nmcas/db";
 import { SEND_SCHEDULED_MESSAGE_QUEUE } from "../queues.js";
-
-const groupJidField = z.string().regex(/@g\.us$/, "groupJid must be a WhatsApp group JID");
-const groupNameField = z.string().min(1).max(512);
-const scheduledAtField = z.string().min(1);
+import {
+  CustomValuesSchema,
+  groupJidField,
+  groupNameField,
+  scheduledAtField,
+} from "../lib/messageSchemas.js";
+import {
+  buildReminderSnapshot,
+  validateReminderTemplateAssets,
+} from "../lib/reminderMessage.js";
 
 const CreatePostMessageSchema = z
   .object({
@@ -41,12 +48,66 @@ const CreatePollMessageSchema = z.object({
   scheduledAt: scheduledAtField,
 });
 
+const CreateValueImageCaptionSchema = z.object({
+  operatorKind: z.literal("VALUE"),
+  valueFormat: z.literal("IMAGE_CAPTION"),
+  groupJid: groupJidField,
+  groupName: groupNameField,
+  copyText: z.string().trim().min(1).max(4096),
+  imageUrl: z.string().min(1).max(2048),
+  scheduledAt: scheduledAtField,
+});
+
+const CreateValueTextOnlySchema = z.object({
+  operatorKind: z.literal("VALUE"),
+  valueFormat: z.literal("TEXT_ONLY"),
+  groupJid: groupJidField,
+  groupName: groupNameField,
+  copyText: z.string().trim().min(1).max(4096),
+  scheduledAt: scheduledAtField,
+});
+
+const CreateValuePollSchema = z.object({
+  operatorKind: z.literal("VALUE"),
+  valueFormat: z.literal("POLL"),
+  groupJid: groupJidField,
+  groupName: groupNameField,
+  pollQuestion: z.string().min(1).max(4096),
+  pollOptions: z
+    .array(z.string().min(1).max(256))
+    .min(2, "At least two poll options")
+    .max(12, "WhatsApp allows at most 12 poll options"),
+  pollMultiSelect: z.boolean(),
+  scheduledAt: scheduledAtField,
+});
+
+const CreateReminderSchema = z.object({
+  operatorKind: z.literal("REMINDER"),
+  reminderTemplateId: z.string().min(1).max(64),
+  customValues: CustomValuesSchema,
+  groupJid: groupJidField,
+  groupName: groupNameField,
+  scheduledAt: scheduledAtField,
+});
+
 const CreateMessageBodySchema = z.preprocess((raw: unknown) => {
-  if (typeof raw === "object" && raw !== null && !("type" in raw)) {
-    return { ...raw, type: "POST" as const };
+  if (typeof raw === "object" && raw !== null) {
+    if ("operatorKind" in raw) {
+      return raw;
+    }
+    if (!("type" in raw)) {
+      return { ...raw, type: "POST" as const };
+    }
   }
   return raw;
-}, z.union([CreatePostMessageSchema, CreatePollMessageSchema]));
+}, z.union([
+  CreateReminderSchema,
+  CreateValueImageCaptionSchema,
+  CreateValueTextOnlySchema,
+  CreateValuePollSchema,
+  CreatePostMessageSchema,
+  CreatePollMessageSchema,
+]));
 
 const ListQuerySchema = z.object({
   status: z
@@ -76,7 +137,62 @@ const PatchDraftPollSchema = z.object({
   pollMultiSelect: z.boolean(),
 });
 
-const PatchDraftBodySchema = z.union([PatchDraftPostSchema, PatchDraftPollSchema]);
+const PatchDraftValueImageSchema = z.object({
+  operatorKind: z.literal("VALUE"),
+  valueFormat: z.literal("IMAGE_CAPTION"),
+  groupJid: groupJidField,
+  groupName: groupNameField,
+  scheduledAt: scheduledAtField,
+  publish: z.boolean(),
+  copyText: z.string().max(4096).optional(),
+  imageUrl: z.string().min(1).max(2048).optional(),
+});
+
+const PatchDraftValueTextSchema = z.object({
+  operatorKind: z.literal("VALUE"),
+  valueFormat: z.literal("TEXT_ONLY"),
+  groupJid: groupJidField,
+  groupName: groupNameField,
+  scheduledAt: scheduledAtField,
+  publish: z.boolean(),
+  copyText: z.string().max(4096).optional(),
+});
+
+const PatchDraftValuePollSchema = z.object({
+  operatorKind: z.literal("VALUE"),
+  valueFormat: z.literal("POLL"),
+  groupJid: groupJidField,
+  groupName: groupNameField,
+  scheduledAt: scheduledAtField,
+  publish: z.boolean(),
+  pollQuestion: z.string().max(4096).optional(),
+  pollOptions: z.array(z.string().max(256)).max(12).optional(),
+  pollMultiSelect: z.boolean().optional(),
+});
+
+const PatchDraftReminderSchema = z.object({
+  operatorKind: z.literal("REMINDER"),
+  reminderTemplateId: z.string().min(1).max(64),
+  customValues: CustomValuesSchema,
+  groupJid: groupJidField,
+  groupName: groupNameField,
+  scheduledAt: scheduledAtField,
+  publish: z.boolean(),
+});
+
+const PatchDraftBodySchema = z.preprocess((raw: unknown) => {
+  if (typeof raw === "object" && raw !== null && "operatorKind" in raw) {
+    return raw;
+  }
+  return raw;
+}, z.union([
+  PatchDraftReminderSchema,
+  PatchDraftValueImageSchema,
+  PatchDraftValueTextSchema,
+  PatchDraftValuePollSchema,
+  PatchDraftPostSchema,
+  PatchDraftPollSchema,
+]));
 
 function parseScheduledAtUtc(iso: string): Date {
   const d = new Date(iso);
@@ -97,6 +213,28 @@ async function safeCancelJob(boss: PgBossInstance, jobId: string | null | undefi
   } catch {
     /* job may have completed or been removed */
   }
+}
+
+async function enqueueAndAttachJob(
+  boss: PgBossInstance,
+  prisma: PrismaClient,
+  rowId: string,
+  scheduledAt: Date,
+): Promise<string | null> {
+  const jobId = await boss.sendAfter(
+    SEND_SCHEDULED_MESSAGE_QUEUE,
+    { scheduledMessageId: rowId },
+    {},
+    scheduledAt,
+  );
+  if (jobId === null) {
+    return null;
+  }
+  await prisma.scheduledMessage.update({
+    where: { id: rowId },
+    data: { pgBossJobId: jobId },
+  });
+  return jobId;
 }
 
 export function registerMessageRoutes(
@@ -130,7 +268,6 @@ export function registerMessageRoutes(
     }
 
     const createdByUserId = req.authUserId ?? null;
-
     const baseRow = {
       projectId,
       groupJid: body.data.groupJid,
@@ -139,6 +276,124 @@ export function registerMessageRoutes(
       status: "PENDING" as const,
       createdByUserId,
     };
+
+    if ("operatorKind" in body.data && body.data.operatorKind === "REMINDER") {
+      const template = await prisma.reminderTemplate.findFirst({
+        where: { id: body.data.reminderTemplateId, projectId },
+      });
+      if (template === null) {
+        return reply.code(400).send({ error: "Reminder template not found" });
+      }
+      const assetErr = validateReminderTemplateAssets(template);
+      if (assetErr !== undefined) {
+        return reply.code(400).send({ error: assetErr });
+      }
+      const snapshot = buildReminderSnapshot(template, body.data.customValues);
+      const row = await prisma.scheduledMessage.create({
+        data: {
+          ...baseRow,
+          type: "POST",
+          operatorKind: "REMINDER",
+          reminderFormat: snapshot.reminderFormat,
+          reminderTemplateId: template.id,
+          copyText: snapshot.copyText,
+          imageUrl: snapshot.imageUrl,
+          stickerUrl: snapshot.stickerUrl,
+          pollQuestion: null,
+          pollOptions: [],
+          pollMultiSelect: false,
+        },
+      });
+      const jobId = await enqueueAndAttachJob(boss, prisma, row.id, scheduledAt);
+      if (jobId === null) {
+        await prisma.scheduledMessage.update({
+          where: { id: row.id },
+          data: { status: "FAILED", error: "Failed to enqueue pg-boss job" },
+        });
+        return reply.code(500).send({ error: "Failed to enqueue job" });
+      }
+      const updated = await prisma.scheduledMessage.findUnique({ where: { id: row.id } });
+      return reply.code(201).send({ message: updated, jobId });
+    }
+
+    if ("operatorKind" in body.data && body.data.operatorKind === "VALUE") {
+      if (body.data.valueFormat === "IMAGE_CAPTION") {
+        const row = await prisma.scheduledMessage.create({
+          data: {
+            ...baseRow,
+            type: "POST",
+            operatorKind: "VALUE",
+            valueFormat: "IMAGE_CAPTION",
+            copyText: body.data.copyText,
+            imageUrl: body.data.imageUrl,
+            stickerUrl: null,
+            pollQuestion: null,
+            pollOptions: [],
+            pollMultiSelect: false,
+          },
+        });
+        const jobId = await enqueueAndAttachJob(boss, prisma, row.id, scheduledAt);
+        if (jobId === null) {
+          await prisma.scheduledMessage.update({
+            where: { id: row.id },
+            data: { status: "FAILED", error: "Failed to enqueue pg-boss job" },
+          });
+          return reply.code(500).send({ error: "Failed to enqueue job" });
+        }
+        const updated = await prisma.scheduledMessage.findUnique({ where: { id: row.id } });
+        return reply.code(201).send({ message: updated, jobId });
+      }
+      if (body.data.valueFormat === "TEXT_ONLY") {
+        const row = await prisma.scheduledMessage.create({
+          data: {
+            ...baseRow,
+            type: "POST",
+            operatorKind: "VALUE",
+            valueFormat: "TEXT_ONLY",
+            copyText: body.data.copyText,
+            imageUrl: null,
+            stickerUrl: null,
+            pollQuestion: null,
+            pollOptions: [],
+            pollMultiSelect: false,
+          },
+        });
+        const jobId = await enqueueAndAttachJob(boss, prisma, row.id, scheduledAt);
+        if (jobId === null) {
+          await prisma.scheduledMessage.update({
+            where: { id: row.id },
+            data: { status: "FAILED", error: "Failed to enqueue pg-boss job" },
+          });
+          return reply.code(500).send({ error: "Failed to enqueue job" });
+        }
+        const updated = await prisma.scheduledMessage.findUnique({ where: { id: row.id } });
+        return reply.code(201).send({ message: updated, jobId });
+      }
+      const row = await prisma.scheduledMessage.create({
+        data: {
+          ...baseRow,
+          type: "POLL",
+          operatorKind: "VALUE",
+          valueFormat: "POLL",
+          copyText: null,
+          imageUrl: null,
+          stickerUrl: null,
+          pollQuestion: body.data.pollQuestion.trim(),
+          pollOptions: body.data.pollOptions.map((o: string) => o.trim()),
+          pollMultiSelect: body.data.pollMultiSelect,
+        },
+      });
+      const jobId = await enqueueAndAttachJob(boss, prisma, row.id, scheduledAt);
+      if (jobId === null) {
+        await prisma.scheduledMessage.update({
+          where: { id: row.id },
+          data: { status: "FAILED", error: "Failed to enqueue pg-boss job" },
+        });
+        return reply.code(500).send({ error: "Failed to enqueue job" });
+      }
+      const updated = await prisma.scheduledMessage.findUnique({ where: { id: row.id } });
+      return reply.code(201).send({ message: updated, jobId });
+    }
 
     const row =
       body.data.type === "POST"
@@ -165,12 +420,7 @@ export function registerMessageRoutes(
             },
           });
 
-    const jobId = await boss.sendAfter(
-      SEND_SCHEDULED_MESSAGE_QUEUE,
-      { scheduledMessageId: row.id },
-      {},
-      scheduledAt,
-    );
+    const jobId = await enqueueAndAttachJob(boss, prisma, row.id, scheduledAt);
     if (jobId === null) {
       await prisma.scheduledMessage.update({
         where: { id: row.id },
@@ -182,11 +432,7 @@ export function registerMessageRoutes(
       return reply.code(500).send({ error: "Failed to enqueue job" });
     }
 
-    const updated = await prisma.scheduledMessage.update({
-      where: { id: row.id },
-      data: { pgBossJobId: jobId },
-    });
-
+    const updated = await prisma.scheduledMessage.findUnique({ where: { id: row.id } });
     return reply.code(201).send({ message: updated, jobId });
   });
 
@@ -216,10 +462,27 @@ export function registerMessageRoutes(
     if (q.data.type !== undefined) {
       where.type = q.data.type;
     }
-    const messages = await prisma.scheduledMessage.findMany({
+    const rows = await prisma.scheduledMessage.findMany({
       where,
       orderBy: { scheduledAt: "desc" },
       take: 100,
+      include: {
+        campaign: { select: { id: true, webinarDate: true } },
+        reminderTemplate: { select: { slotKey: true, name: true } },
+      },
+    });
+    const messages = rows.map((row) => {
+      const { campaign, reminderTemplate, ...message } = row;
+      return {
+        ...message,
+        campaignId: message.campaignId,
+        campaignWebinarDate:
+          campaign !== null
+            ? campaign.webinarDate.toISOString().slice(0, 10)
+            : null,
+        reminderTemplateSlotKey: reminderTemplate?.slotKey ?? null,
+        reminderTemplateName: reminderTemplate?.name ?? null,
+      };
     });
     return { messages };
   });
@@ -253,10 +516,6 @@ export function registerMessageRoutes(
     return { message: updated };
   });
 
-  /**
-   * Re-enqueue the pg-boss send job. Needed when the row was set to PENDING/SENDING in SQL (no job exists),
-   * or a stuck SENDING row lost its worker job after a deploy/crash.
-   */
   app.post("/messages/:id/requeue", async (req: FastifyRequest, reply: FastifyReply) => {
     const projectId = req.activeProjectId;
     if (projectId === undefined || projectId.length === 0) {
@@ -277,13 +536,6 @@ export function registerMessageRoutes(
         .code(400)
         .send({ error: "Only PENDING, SENDING, or FAILED messages can be requeued" });
     }
-    /**
-     * Guard against re-queueing a SENDING row that still has an active worker job.
-     * A SENDING row within 5 minutes of its scheduledAt is likely mid-send — the worker
-     * has a 120s timeout so it cannot have already timed out. Forcing a requeue here would
-     * reset status to PENDING while the worker completes, causing a duplicate send when the
-     * new job fires. Rows stuck in SENDING for >5 min are safe to requeue (worker crashed).
-     */
     if (row.status === "SENDING") {
       const stuckCutoff = new Date(Date.now() - 5 * 60_000);
       if (row.scheduledAt.getTime() > stuckCutoff.getTime()) {
@@ -377,6 +629,211 @@ export function registerMessageRoutes(
     const scheduledAt = parseScheduledAtUtc(body.data.scheduledAt);
     const d = body.data;
 
+    if ("operatorKind" in d && d.operatorKind === "REMINDER") {
+      const template = await prisma.reminderTemplate.findFirst({
+        where: { id: d.reminderTemplateId, projectId },
+      });
+      if (template === null) {
+        return reply.code(400).send({ error: "Reminder template not found" });
+      }
+      if (d.publish) {
+        const minTime = new Date(Date.now() + 15_000);
+        if (scheduledAt.getTime() < minTime.getTime()) {
+          return reply.code(400).send({ error: "scheduledAt must be at least ~15 seconds in the future" });
+        }
+        const assetErr = validateReminderTemplateAssets(template);
+        if (assetErr !== undefined) {
+          return reply.code(400).send({ error: assetErr });
+        }
+      }
+      const snapshot = buildReminderSnapshot(template, d.customValues);
+      let updated = await prisma.scheduledMessage.update({
+        where: { id: row.id },
+        data: {
+          type: "POST",
+          operatorKind: "REMINDER",
+          reminderFormat: snapshot.reminderFormat,
+          reminderTemplateId: template.id,
+          valueFormat: null,
+          groupJid: d.groupJid,
+          groupName: d.groupName,
+          scheduledAt,
+          copyText: snapshot.copyText,
+          imageUrl: snapshot.imageUrl,
+          stickerUrl: snapshot.stickerUrl,
+          pollQuestion: null,
+          pollOptions: [],
+          pollMultiSelect: false,
+          error: null,
+        },
+      });
+      if (d.publish) {
+        const jobId = await enqueueAndAttachJob(boss, prisma, updated.id, scheduledAt);
+        if (jobId === null) {
+          await prisma.scheduledMessage.update({
+            where: { id: row.id },
+            data: { status: "FAILED", error: "Failed to enqueue pg-boss job" },
+          });
+          return reply.code(500).send({ error: "Failed to enqueue job" });
+        }
+        updated = await prisma.scheduledMessage.update({
+          where: { id: row.id },
+          data: { status: "PENDING", pgBossJobId: jobId },
+        });
+      }
+      return { message: updated };
+    }
+
+    if ("operatorKind" in d && d.operatorKind === "VALUE") {
+      if (d.valueFormat === "IMAGE_CAPTION") {
+        const copyTextTrimmed = d.copyText?.trim() ?? "";
+        const hasImage = d.imageUrl !== undefined && d.imageUrl.length > 0;
+        if (d.publish) {
+          const minTime = new Date(Date.now() + 15_000);
+          if (scheduledAt.getTime() < minTime.getTime()) {
+            return reply.code(400).send({ error: "scheduledAt must be at least ~15 seconds in the future" });
+          }
+          if (copyTextTrimmed.length === 0 || !hasImage) {
+            return reply.code(400).send({ error: "Image and caption are required when publishing" });
+          }
+        }
+        let updated = await prisma.scheduledMessage.update({
+          where: { id: row.id },
+          data: {
+            type: "POST",
+            operatorKind: "VALUE",
+            valueFormat: "IMAGE_CAPTION",
+            reminderFormat: null,
+            reminderTemplateId: null,
+            groupJid: d.groupJid,
+            groupName: d.groupName,
+            scheduledAt,
+            copyText: copyTextTrimmed.length > 0 ? copyTextTrimmed : null,
+            imageUrl: d.imageUrl ?? null,
+            stickerUrl: null,
+            pollQuestion: null,
+            pollOptions: [],
+            pollMultiSelect: false,
+            error: null,
+          },
+        });
+        if (d.publish) {
+          const jobId = await enqueueAndAttachJob(boss, prisma, updated.id, scheduledAt);
+          if (jobId === null) {
+            await prisma.scheduledMessage.update({
+              where: { id: row.id },
+              data: { status: "FAILED", error: "Failed to enqueue pg-boss job" },
+            });
+            return reply.code(500).send({ error: "Failed to enqueue job" });
+          }
+          updated = await prisma.scheduledMessage.update({
+            where: { id: row.id },
+            data: { status: "PENDING", pgBossJobId: jobId },
+          });
+        }
+        return { message: updated };
+      }
+
+      if (d.valueFormat === "TEXT_ONLY") {
+        const copyTextTrimmed = d.copyText?.trim() ?? "";
+        if (d.publish) {
+          const minTime = new Date(Date.now() + 15_000);
+          if (scheduledAt.getTime() < minTime.getTime()) {
+            return reply.code(400).send({ error: "scheduledAt must be at least ~15 seconds in the future" });
+          }
+          if (copyTextTrimmed.length === 0) {
+            return reply.code(400).send({ error: "Caption is required when publishing" });
+          }
+        }
+        let updated = await prisma.scheduledMessage.update({
+          where: { id: row.id },
+          data: {
+            type: "POST",
+            operatorKind: "VALUE",
+            valueFormat: "TEXT_ONLY",
+            reminderFormat: null,
+            reminderTemplateId: null,
+            groupJid: d.groupJid,
+            groupName: d.groupName,
+            scheduledAt,
+            copyText: copyTextTrimmed.length > 0 ? copyTextTrimmed : null,
+            imageUrl: null,
+            stickerUrl: null,
+            pollQuestion: null,
+            pollOptions: [],
+            pollMultiSelect: false,
+            error: null,
+          },
+        });
+        if (d.publish) {
+          const jobId = await enqueueAndAttachJob(boss, prisma, updated.id, scheduledAt);
+          if (jobId === null) {
+            await prisma.scheduledMessage.update({
+              where: { id: row.id },
+              data: { status: "FAILED", error: "Failed to enqueue pg-boss job" },
+            });
+            return reply.code(500).send({ error: "Failed to enqueue job" });
+          }
+          updated = await prisma.scheduledMessage.update({
+            where: { id: row.id },
+            data: { status: "PENDING", pgBossJobId: jobId },
+          });
+        }
+        return { message: updated };
+      }
+
+      const pollOpts = (d.pollOptions ?? []).map((o: string) => o.trim()).filter((o: string) => o.length > 0);
+      const pollQuestion = d.pollQuestion?.trim() ?? "";
+      const pollMultiSelect = d.pollMultiSelect ?? false;
+      if (d.publish) {
+        const minTime = new Date(Date.now() + 15_000);
+        if (scheduledAt.getTime() < minTime.getTime()) {
+          return reply.code(400).send({ error: "scheduledAt must be at least ~15 seconds in the future" });
+        }
+        if (pollQuestion.length === 0) {
+          return reply.code(400).send({ error: "Poll question is required when publishing" });
+        }
+        if (pollOpts.length < 2) {
+          return reply.code(400).send({ error: "At least two poll options required when publishing" });
+        }
+      }
+      let updated = await prisma.scheduledMessage.update({
+        where: { id: row.id },
+        data: {
+          type: "POLL",
+          operatorKind: "VALUE",
+          valueFormat: "POLL",
+          reminderFormat: null,
+          reminderTemplateId: null,
+          groupJid: d.groupJid,
+          groupName: d.groupName,
+          scheduledAt,
+          copyText: null,
+          imageUrl: null,
+          stickerUrl: null,
+          pollQuestion: pollQuestion.length > 0 ? pollQuestion : null,
+          pollOptions: pollOpts,
+          pollMultiSelect,
+          error: null,
+        },
+      });
+      if (d.publish) {
+        const jobId = await enqueueAndAttachJob(boss, prisma, updated.id, scheduledAt);
+        if (jobId === null) {
+          await prisma.scheduledMessage.update({
+            where: { id: row.id },
+            data: { status: "FAILED", error: "Failed to enqueue pg-boss job" },
+          });
+          return reply.code(500).send({ error: "Failed to enqueue job" });
+        }
+        updated = await prisma.scheduledMessage.update({
+          where: { id: row.id },
+          data: { status: "PENDING", pgBossJobId: jobId },
+        });
+      }
+      return { message: updated };
+    }
+
     if (d.type === "POST") {
       const copyTextTrimmed = d.copyText?.trim() ?? "";
       const hasImage = d.imageUrl !== undefined && d.imageUrl.length > 0;
@@ -407,12 +864,7 @@ export function registerMessageRoutes(
       });
 
       if (d.publish) {
-        const jobId = await boss.sendAfter(
-          SEND_SCHEDULED_MESSAGE_QUEUE,
-          { scheduledMessageId: updated.id },
-          {},
-          scheduledAt,
-        );
+        const jobId = await enqueueAndAttachJob(boss, prisma, updated.id, scheduledAt);
         if (jobId === null) {
           await prisma.scheduledMessage.update({
             where: { id: row.id },
@@ -463,12 +915,7 @@ export function registerMessageRoutes(
     });
 
     if (d.publish) {
-      const jobId = await boss.sendAfter(
-        SEND_SCHEDULED_MESSAGE_QUEUE,
-        { scheduledMessageId: updated.id },
-        {},
-        scheduledAt,
-      );
+      const jobId = await enqueueAndAttachJob(boss, prisma, updated.id, scheduledAt);
       if (jobId === null) {
         await prisma.scheduledMessage.update({
           where: { id: row.id },

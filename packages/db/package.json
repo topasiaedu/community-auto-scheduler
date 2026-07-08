@@ -17,6 +17,7 @@
     "seed": "node ../../scripts/seed.mjs",
     "build": "prisma generate && tsc",
     "typecheck": "prisma generate && tsc --noEmit",
+    "test": "npm run build && node --test dist/mergeTemplate.test.js",
     "prepare": "npm run build"
   },
   "prisma": {

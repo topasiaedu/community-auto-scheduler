@@ -36,8 +36,8 @@ function getInitials(email: string): string {
 
 const NAV_LINKS = [
   { to: "/queue", label: "Queue" },
-  { to: "/compose", label: "Compose" },
-  { to: "/connect", label: "Connect" },
+  { to: "/schedule", label: "Schedule" },
+  { to: "/whatsapp", label: "WhatsApp" },
   { to: "/settings", label: "Settings" },
 ] as const;
 
@@ -46,7 +46,7 @@ export function AppShell(): ReactElement {
   const location = useLocation();
   const email = vm.session?.user.email ?? vm.session?.user.id ?? "";
   const showBanner =
-    vm.canUseApiRoutes && !vm.waConnected && location.pathname !== "/connect";
+    vm.canUseApiRoutes && !vm.waConnected && location.pathname !== "/whatsapp";
 
   return (
     <div className="shell">
@@ -130,8 +130,8 @@ export function AppShell(): ReactElement {
                 ? "WhatsApp is connecting…"
                 : "WhatsApp not linked"}
             </span>
-            <NavLink to="/connect" className="font-semibold text-primary hover:underline">
-              Go to Connect →
+            <NavLink to="/whatsapp" className="font-semibold text-primary hover:underline">
+              Go to WhatsApp →
             </NavLink>
           </AlertDescription>
         </Alert>

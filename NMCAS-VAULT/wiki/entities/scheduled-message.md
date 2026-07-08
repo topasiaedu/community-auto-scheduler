@@ -1,8 +1,8 @@
 ---
 title: "Entity: ScheduledMessage"
 type: "entity"
-updated: "2026-04-21"
-sources: 2
+updated: "2026-07-07"
+sources: 3
 tags: ["entity", "nmcas", "data-model"]
 ---
 
@@ -10,7 +10,9 @@ tags: ["entity", "nmcas", "data-model"]
 
 ## Definition
 
-A **ScheduledMessage** is a unit of work: one message (Post or Poll) destined for one WhatsApp group at one specific datetime. It belongs to a Project.
+A **ScheduledMessage** is a unit of work: one message destined for one WhatsApp group (or community Announcements channel) at one specific datetime. It belongs to a Project.
+
+**Operator model (planned):** Value post vs Reminder — see [[wiki/concepts/value-vs-reminder-messages]]. Current schema still uses `POST` / `POLL` only.
 
 ## Schema (Prisma)
 
@@ -114,8 +116,40 @@ The background rescue sweep (`rescue-sweep.ts`) auto-re-enqueues rows without ne
 - PENDING rows overdue by >10s with no live pg-boss job.
 - SENDING rows overdue by >10min with no live pg-boss job (worker crash recovery).
 
+## Planned extensions (build in progress — not in schema yet)
+
+| Need | Direction |
+|------|-----------|
+| Value vs Reminder | `operatorKind` + `valueFormat` / `reminderMediaKind` (keep legacy `POST`/`POLL` during migration) |
+| Value sub-format | `image_caption` \| `poll` \| `text_only` |
+| Reminder sticker | `stickerUrl` (static WebP); `stickerMessage` + `messageSecret` |
+| Reminder SOP image | `imageUrl`; `copyText` optional (caption allowed on images only) |
+| Reminder text | `copyText` only (e.g. LIVE NOW join link); no media. `reminderMediaKind` needs a `TEXT` value (or `reminderFormat` enum: `IMAGE`\|`STICKER`\|`TEXT`) |
+| Per-project templates | `ReminderTemplate` model — named SOP slots (Welcome, 2d, 1d, …) |
+| Event datetime chips | Schedule UI helper: see [[wiki/concepts/campaign-message-schedule]] |
+
+### Event-relative chips (from SOP reference)
+
+Two anchors on the Schedule screen: **webinar date** + **event start time** (MYT). Slot clock times are **fixed** (intern does not edit them).
+
+| Chip | `scheduledAt` |
+|------|----------------|
+| Welcome | webinarDate − 4d @ 15:00 |
+| 2-Day Countdown | webinarDate − 2d @ 15:00 |
+| 1-Day Countdown | webinarDate − 1d @ 20:00 |
+| Starting Soon | webinarDate @ 11:00 |
+| LIVE NOW | eventStart − 2 min |
+| Post-Live Sticker | eventStart + 18 min |
+| Value Post | chosen day @ 11:00 |
+
+Full two-track schedule (Show Up + Value Post): see [[wiki/concepts/campaign-message-schedule]].
+
 ## See also
 
+- [[wiki/concepts/campaign-message-schedule]]
+- [[wiki/concepts/value-vs-reminder-messages]]
+- [[wiki/sources/2026-07-07-whatsapp-community-sop-dr-jasmine-show-up-reference]]
+- [[wiki/sources/2026-07-06-whatsmeow-deploy-product-ux-session]]
 - [[wiki/entities/project]]
 - [[wiki/concepts/pg-boss-scheduler]]
 - [[wiki/concepts/wa-connection-pool]]

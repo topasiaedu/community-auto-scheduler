@@ -18,14 +18,18 @@ Catalog of all wiki pages. Updated after every ingest, filed query, or lint pass
 - [[wiki/sources/2026-04-17-wa-p2-api-stability]] — P2 WA API: poll-safe `start()`, Storage `keys.set` pairing latency, cred flush, reconnect tuning.
 - [[wiki/sources/2026-04-18-nmcas-implementation-snapshot]] — Repo snapshot: auth, P4 pool, partial P5/P6, deploy (Docker/Vercel), deferred UI.
 - [[wiki/sources/2026-04-21-stability-hardening-session]] — Stability hardening: duplicate-send root cause, rescue sweep, timeout→FAILED fix, requeue route, race guards, Baileys silent logger.
+- [[wiki/sources/2026-07-06-whatsmeow-deploy-product-ux-session]] — whatsmeow migration, Render/Vercel production, Value vs Reminder model, intern UX plan (P7, not implemented).
+- [[wiki/sources/2026-07-07-whatsapp-community-sop-dr-jasmine-show-up-reference]] — Saved SOP assets; six message slots with exact triggers; corrects welcome + timing paraphrase.
 
 ---
 
 ## Concepts
 
+- [[wiki/concepts/campaign-message-schedule]] — SOP slot triggers (welcome on-join, countdowns, live, thank-you); event-relative chips.
 - [[wiki/concepts/compounding-knowledge-base]] — LLM Wiki as persistent compiled layer; ingest / query / lint.
+- [[wiki/concepts/value-vs-reminder-messages]] — Operator model: Value post (fresh copy, poll nested) vs Reminder (SOP assets, stickers, countdowns).
 - [[wiki/concepts/multi-project-architecture]] — Project as top-level entity; how resources are scoped per project.
-- [[wiki/concepts/wa-connection-pool]] — Baileys multi-instance pool; session persistence; timeout/reconnect handling; free-tier infra notes.
+- [[wiki/concepts/wa-connection-pool]] — whatsmeow-node pool; SQLite + WhatsAppSessionBlob; timeout/reconnect; free-tier infra notes.
 - [[wiki/concepts/pg-boss-scheduler]] — pg-boss Postgres-backed job queue; rescue sweep; requeue route; race protection table.
 
 ---
@@ -33,14 +37,15 @@ Catalog of all wiki pages. Updated after every ingest, filed query, or lint pass
 ## Entities
 
 - [[wiki/entities/project]] — Project data model: owns sessions, messages, notify recipients, and WA connection.
-- [[wiki/entities/scheduled-message]] — ScheduledMessage data model: POST and POLL types, full status lifecycle (DRAFT/PENDING/SENDING/SENT/FAILED/CANCELLED), requeue behaviour, rescue sweep interaction.
+- [[wiki/entities/scheduled-message]] — ScheduledMessage data model: POST and POLL types (legacy); planned Value/Reminder; full status lifecycle.
 
 ---
 
 ## Meta
 
+- [[wiki/analysis/p7-implementation-plan]] — P7 build plan: campaign wizard, Custom Values, templates, phases 1–7.
 - `CLAUDE.md` — Schema and agent rules (see vault root).
 
 ---
 
-*Last indexed: 2026-04-21 — stability hardening session ingest.*
+*Last indexed: 2026-07-07 — P7 implementation plan filed.*

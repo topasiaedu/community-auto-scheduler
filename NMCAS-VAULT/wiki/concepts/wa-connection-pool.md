@@ -1,42 +1,62 @@
 ---
-title: "WhatsApp connection pool (Baileys multi-instance)"
+title: "WhatsApp connection pool (whatsmeow-node)"
 type: "concept"
-updated: "2026-04-21"
-sources: 5
-tags: ["baileys", "whatsapp", "architecture", "nmcas"]
+updated: "2026-07-06"
+sources: 6
+tags: ["whatsmeow", "whatsapp", "architecture", "nmcas"]
 ---
 
-# WhatsApp connection pool (Baileys multi-instance)
+# WhatsApp connection pool
+
+> **2026-07 migration:** Production API uses **`@whatsmeow-node/whatsmeow-node`**, not Baileys. Pool shape is unchanged (`WaConnectionPool`, one manager per `projectId`). Sessions: **local SQLite** persisted to Postgres **`WhatsAppSessionBlob`**. Community Announcements sends include **`messageSecret`**. Sections below that mention Baileys describe the **pre-2026-07** implementation unless noted.
 
 ## What it is
 
-The API backend maintains a **connection pool** — a singleton Map that holds one active Baileys WebSocket instance per project, keyed by `projectId`:
+The API backend maintains a **connection pool** — a singleton Map that holds one active WhatsApp Web instance per project, keyed by `projectId`:
 
 ```
-connectionPool: Map<projectId, BaileysSocket>
-  "project-abc" → BaileysSocket (state: CONNECTED)
-  "project-xyz" → BaileysSocket (state: DISCONNECTED — needs QR)
+connectionPool: Map<projectId, WaManager>
+  "project-abc" → connected
+  "project-xyz" → disconnected — needs QR
 ```
 
-When a scheduled job fires, the worker looks up `projectId` in the pool and sends via the correct socket. When the Settings screen is opened for a project, the pool creates or reconnects that project's socket and streams the QR code to the UI.
+When a scheduled job fires, the worker looks up `projectId` in the pool and sends via the correct connection. Connect UI streams QR for that project's session.
 
 ## Why personal WhatsApp (not Meta Cloud API)
 
-Meta's Business API cannot manage WhatsApp communities — it cannot create groups, add members to community subgroups, or post to community announcement channels. Baileys (unofficial personal WA client) is the only option for community management use cases.
+Meta's Business API cannot manage WhatsApp communities — it cannot create groups, add members to community subgroups, or post to community announcement channels. An unofficial personal WA client (Baileys historically; **whatsmeow-node** now) is the option used for community management.
 
-## Session persistence
+## Session persistence (current — 2026-07)
 
-Baileys generates auth credentials (JSON) that must persist across process restarts. In NMCAS these are stored in **Supabase Storage** (private bucket) rather than the local filesystem, using a custom `authState` adapter. This avoids the need for Render Persistent Disk.
-
-Session folder naming convention: `sessions/{projectId}/` within the private Supabase Storage bucket.
+- Runtime: SQLite file per project (whatsmeow store).
+- Durability: bytea row in **`WhatsAppSessionBlob`** via Prisma + `DATABASE_URL` (Supabase pooler OK).
+- Post images: still **Supabase Storage** (`NMCAS_POST_MEDIA_BUCKET`).
+- Optional local dev: `WHATSAPP_STORE_URL=file:./data/wa-sessions`.
+- Legacy: P0 spike and Supabase Storage Baileys adapter — **not** used by shipped API.
 
 ## P4 implementation (current monorepo)
 
-The API ships **`WaConnectionPool`** (`apps/api/src/wa/wa-pool.ts`): one **`WaManager(env, projectId)`** per project. HTTP routes under `X-Project-Id` delegate to `pool.getManager(projectId)`; the pg-boss worker calls `pool.start(projectId)` and `getSocket(projectId)`.
+The API ships **`WaConnectionPool`** (`apps/api/src/wa/wa-pool.ts`): one **`WaManager(env, projectId)`** per project. HTTP routes under `X-Project-Id` delegate to `pool.getManager(projectId)`; the pg-boss worker calls `pool.start(projectId)` and uses whatsmeow send helpers.
 
-**`start()`** is **idempotent** — reuses a live WebSocket when healthy, boots only when `socket` is missing or `ws.isClosed`, and returns early without booting when a `reconnectTimer` is armed (critical: avoids bypassing Baileys' backoff and causing 440 loops).
+**`start()`** remains **idempotent** — reuse healthy connection, boot when missing; avoid fighting library reconnect backoff.
 
-## Reconnect handling and backoff
+---
+
+## Historical: Baileys implementation (pre-2026-07)
+
+The following described Baileys; behaviour concepts (timeout→FAILED, no `forceRestart` in worker, rescue sweep) still apply to the worker layer.
+
+### Baileys pool shape
+
+```
+connectionPool: Map<projectId, BaileysSocket>
+```
+
+### Baileys session persistence (superseded)
+
+Auth credentials in **Supabase Storage** private bucket, `sessions/{projectId}/`.
+
+### Reconnect handling and backoff (Baileys)
 
 Baileys fires `connection.update` with `connection: 'close'` on disconnect. `handleConnectionClosed` schedules a reconnect via `scheduleBootAfterClose`:
 
@@ -76,7 +96,7 @@ Set to `pino({ level: "silent" })` in production (`NODE_ENV === "production"`). 
 
 ## Risk note
 
-Baileys is an **unofficial** WhatsApp client. Sending bulk or high-frequency messages can trigger account restrictions. NMCAS is designed for low-volume community posts.
+Unofficial WhatsApp clients (Baileys / whatsmeow) can trigger account restrictions if abused. NMCAS is designed for low-volume community posts.
 
 ## Sources
 
@@ -85,12 +105,15 @@ Baileys is an **unofficial** WhatsApp client. Sending bulk or high-frequency mes
 - API stability (P2): `raw/sources/2026-04-17-wa-p2-api-stability.md`
 - Implementation snapshot: `raw/sources/2026-04-18-nmcas-implementation-snapshot.md`
 - Stability hardening: `raw/sources/2026-04-21-stability-hardening-session.md`
+- whatsmeow migration + deploy: `raw/sources/2026-07-06-whatsmeow-deploy-product-ux-session.md`
 
 ## See also
 
+- [[wiki/concepts/value-vs-reminder-messages]]
 - [[wiki/concepts/multi-project-architecture]]
 - [[wiki/concepts/pg-boss-scheduler]]
 - [[wiki/entities/project]]
 - [[wiki/entities/scheduled-message]]
 - [[wiki/sources/2026-04-21-stability-hardening-session]]
+- [[wiki/sources/2026-07-06-whatsmeow-deploy-product-ux-session]]
 - [[wiki/overview]]

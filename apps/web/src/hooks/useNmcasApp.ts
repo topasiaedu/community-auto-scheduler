@@ -249,6 +249,9 @@ export function useNmcasApp() {
       const json = (await res.json()) as { projects?: ProjectRow[] };
       const list = Array.isArray(json.projects) ? json.projects : [];
       setProjects(list);
+    } catch {
+      setProjectsError("Could not reach the API. Check VITE_API_URL and try again.");
+      setProjects([]);
     } finally {
       setProjectsLoading(false);
     }

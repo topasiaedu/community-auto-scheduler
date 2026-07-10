@@ -8,9 +8,10 @@ tags: ["nmcas", "p7", "implementation", "product", "sop"]
 
 # P7 implementation plan — campaign scheduler
 
-**Status:** Ready to build (decisions locked)  
-**Scope:** One complete delivery — intern-ready campaign scheduling end-to-end  
-**UX & API (agent-ready):** [[wiki/analysis/p7-ux-spec]] — wizard steps, validation, API JSON, acceptance matrix  
+**Status:** Shipped on `main` (`8f7d1c1`, 2026-07-08) — live E2E pending deploy  
+**Scope:** One complete delivery — intern-ready Show Up campaign scheduling (+ Single message Value)  
+**UX amendments after build:** [[wiki/sources/2026-07-08-p7-campaign-scheduler-ship-session]]  
+**UX & API (agent-ready, partially outdated for campaign Value step):** [[wiki/analysis/p7-ux-spec]]  
 **Ground truth:** [[wiki/sources/2026-07-07-whatsapp-community-sop-dr-jasmine-show-up-reference]], [[wiki/concepts/campaign-message-schedule]]
 
 ---

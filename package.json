@@ -16,7 +16,7 @@
     "build:web": "npm run build -w @nmcas/web",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "db:generate": "npm run generate -w @nmcas/db",
-    "db:migrate": "npm run migrate:dev -w @nmcas/db",
+    "db:migrate": "node ./scripts/migrate-dev.mjs",
     "db:deploy": "node ./scripts/migrate-deploy.mjs",
     "db:seed": "node ./scripts/seed.mjs"
   },

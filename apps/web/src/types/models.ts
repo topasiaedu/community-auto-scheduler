@@ -76,6 +76,8 @@ export type ProjectRow = {
   description: string | null;
   sopUrl: string | null;
   campaignNote: string | null;
+  /** null or [] = all eligible communities for Value fan-out. */
+  activeCommunityJids: string[] | null;
 };
 
 /** Eight merge fields from campaign setup (P7 UX spec §4 Step 1). */

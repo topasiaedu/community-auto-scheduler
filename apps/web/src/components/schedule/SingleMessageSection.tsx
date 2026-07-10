@@ -34,6 +34,7 @@ import {
   singleMessageFormatLabel,
   singleMessagePreviewBody,
 } from "../../lib/singleMessageBuilders.js";
+import { resolveValueFanOutDestinationsForProject } from "../../lib/valueFanOut.js";
 import { mergeTemplate } from "../../lib/mergeTemplate.js";
 import { SAMPLE_CUSTOM_VALUES } from "../../lib/sampleCustomValues.js";
 import { templateHasRequiredAssets } from "../../lib/templateValidation.js";
@@ -72,6 +73,8 @@ export function SingleMessageSection({ vm }: SingleMessageSectionProps): ReactEl
     canUseApiRoutes,
     waConnected,
     groups,
+    projects,
+    selectedProjectId,
     groupJid,
     groupPickerLabel,
     copyText,
@@ -162,12 +165,25 @@ export function SingleMessageSection({ vm }: SingleMessageSectionProps): ReactEl
     return null;
   }
 
+  const selectedProject = useMemo(
+    () => projects.find((p) => p.id === selectedProjectId),
+    [projects, selectedProjectId],
+  );
+
+  const valueFanOut = useMemo(() => {
+    const activeCommunityJids = selectedProject?.activeCommunityJids ?? null;
+    return resolveValueFanOutDestinationsForProject(groups, activeCommunityJids);
+  }, [groups, selectedProject?.activeCommunityJids]);
+
+  const isValueFanOut = operatorKind === "VALUE";
+
   const buildFields = () => ({
     operatorKind,
     valueFormat,
     scheduledLocal,
     groupJid,
     groupName: groupPickerLabel,
+    fanOut: isValueFanOut ? true : undefined,
     copyText: operatorKind === "REMINDER" ? reminderPreviewText : copyText,
     imagePath,
     pollQuestion,
@@ -183,8 +199,14 @@ export function SingleMessageSection({ vm }: SingleMessageSectionProps): ReactEl
       setFormError("Connect WhatsApp first (see Link WhatsApp).");
       return;
     }
-    if (groupJid.length === 0) {
+    if (!isValueFanOut && groupJid.length === 0) {
       setFormError("Pick a destination community channel.");
+      return;
+    }
+    if (isValueFanOut && valueFanOut.count === 0) {
+      setFormError(
+        "No active communities with an Announcements channel. Check Settings or WhatsApp connection.",
+      );
       return;
     }
 
@@ -227,7 +249,14 @@ export function SingleMessageSection({ vm }: SingleMessageSectionProps): ReactEl
         setFormError(err.error ?? `Schedule failed (${String(res.status)})`);
         return;
       }
-      toast("Message scheduled.");
+      const json = (await res.json().catch(() => ({}))) as {
+        fanOutCount?: number;
+      };
+      if (typeof json.fanOutCount === "number" && json.fanOutCount > 1) {
+        toast(`Scheduled ${String(json.fanOutCount)} Value posts.`);
+      } else {
+        toast("Message scheduled.");
+      }
       clearScheduleForm();
       vm.refreshMessages();
     })();
@@ -276,13 +305,57 @@ export function SingleMessageSection({ vm }: SingleMessageSectionProps): ReactEl
         {/* Where */}
         <div className="p-5 space-y-4">
           <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Where</p>
-          <CommunityChannelPicker
-            groups={groups}
-            groupJid={groupJid}
-            waConnected={waConnected}
-            onGroupSelect={onGroupSelect}
-            idPrefix="single"
-          />
+          {isValueFanOut ? (
+            <div className="space-y-2">
+              {valueFanOut.count === 0 ? (
+                <Alert variant="destructive">
+                  <AlertDescription>
+                    No active communities with an Announcements channel.{" "}
+                    <Link
+                      to="/settings#active-communities"
+                      className="font-semibold underline underline-offset-2"
+                    >
+                      Manage active communities
+                    </Link>{" "}
+                    or check WhatsApp connection.
+                  </AlertDescription>
+                </Alert>
+              ) : (
+                <Alert className="border-blue-200 bg-blue-50 text-blue-900">
+                  <AlertDescription className="text-sm space-y-2">
+                    <p>
+                      Will send to <strong>{String(valueFanOut.count)}</strong> active{" "}
+                      {valueFanOut.count === 1 ? "community" : "communities"}.
+                    </p>
+                    <details>
+                      <summary className="cursor-pointer font-medium">View destinations</summary>
+                      <ul className="mt-2 list-disc pl-5 space-y-0.5">
+                        {valueFanOut.destinations.map((dest) => (
+                          <li key={dest.groupJid}>{dest.groupName}</li>
+                        ))}
+                      </ul>
+                    </details>
+                    <p>
+                      <Link
+                        to="/settings#active-communities"
+                        className="font-semibold text-primary underline underline-offset-2"
+                      >
+                        Manage active communities
+                      </Link>
+                    </p>
+                  </AlertDescription>
+                </Alert>
+              )}
+            </div>
+          ) : (
+            <CommunityChannelPicker
+              groups={groups}
+              groupJid={groupJid}
+              waConnected={waConnected}
+              onGroupSelect={onGroupSelect}
+              idPrefix="single"
+            />
+          )}
         </div>
 
         <Separator />
@@ -510,7 +583,11 @@ export function SingleMessageSection({ vm }: SingleMessageSectionProps): ReactEl
       <div className="compose-layout__preview">
         <MessagePreview
           kind={previewKindForMessage}
-          groupTitle={groupPickerLabel}
+          groupTitle={
+            isValueFanOut
+              ? `${String(valueFanOut.count)} active communit${valueFanOut.count === 1 ? "y" : "ies"}`
+              : groupPickerLabel
+          }
           copyText={operatorKind === "REMINDER" ? reminderPreviewText : copyText}
           pollQuestion={pollQuestion}
           pollOptions={pollOptions}
@@ -527,12 +604,32 @@ export function SingleMessageSection({ vm }: SingleMessageSectionProps): ReactEl
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Schedule this message?</DialogTitle>
+            <DialogTitle>
+              {isValueFanOut && valueFanOut.count > 1
+                ? `Schedule ${String(valueFanOut.count)} Value posts?`
+                : "Schedule this message?"}
+            </DialogTitle>
             <DialogDescription asChild>
               <div className="space-y-2 text-sm text-muted-foreground">
-                <p>
-                  <strong>Destination:</strong> {groupPickerLabel || "—"}
-                </p>
+                {isValueFanOut ? (
+                  <>
+                    <p>
+                      <strong>Destinations:</strong> {String(valueFanOut.count)} active{" "}
+                      {valueFanOut.count === 1 ? "community" : "communities"}
+                    </p>
+                    {valueFanOut.destinations.length > 0 ? (
+                      <ul className="list-disc pl-5 space-y-0.5 max-h-32 overflow-y-auto">
+                        {valueFanOut.destinations.map((dest) => (
+                          <li key={dest.groupJid}>{dest.groupName}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </>
+                ) : (
+                  <p>
+                    <strong>Destination:</strong> {groupPickerLabel || "—"}
+                  </p>
+                )}
                 <p>
                   <strong>Kind:</strong> {operatorKind === "VALUE" ? "Value" : "Reminder"} ·{" "}
                   {singleMessageFormatLabel(buildFields())}

@@ -49,3 +49,36 @@ export function resolveValueFanOutDestinations(groups: readonly WaGroup[]): {
   }
   return { destinations, count: destinations.length };
 }
+
+function isActiveCommunityFilterEmpty(activeCommunityJids: string[] | null): boolean {
+  return activeCommunityJids === null || activeCommunityJids.length === 0;
+}
+
+/**
+ * Resolves fan-out destinations, optionally restricted to active project communities.
+ * null or [] activeCommunityJids means all eligible communities (backward compatible).
+ */
+export function resolveValueFanOutDestinationsForProject(
+  groups: readonly WaGroup[],
+  activeCommunityJids: string[] | null,
+): {
+  destinations: FanOutDestination[];
+  count: number;
+} {
+  const { destinations } = resolveValueFanOutDestinations(groups);
+  if (isActiveCommunityFilterEmpty(activeCommunityJids)) {
+    return { destinations, count: destinations.length };
+  }
+  const activeSet = new Set(activeCommunityJids);
+  const communityJidByGroupJid = new Map<string, string>();
+  for (const g of groups.map((row) => normalizeWaGroupRow(row))) {
+    if (g.communityJid !== undefined && g.communityJid.trim().length > 0) {
+      communityJidByGroupJid.set(g.jid, g.communityJid.trim());
+    }
+  }
+  const filtered = destinations.filter((d) => {
+    const communityJid = communityJidByGroupJid.get(d.groupJid);
+    return communityJid !== undefined && activeSet.has(communityJid);
+  });
+  return { destinations: filtered, count: filtered.length };
+}

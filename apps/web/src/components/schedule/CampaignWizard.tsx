@@ -21,9 +21,14 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import {
+  buildOperatorSkipSlotKeys,
+  classifyCampaignSlots,
   computeShowUpSlots,
+  countScheduledCampaignSlots,
+  getDefaultSelectedSlotKeys,
+  getSchedulableSlotKeys,
+  hasPastCampaignSlots,
   isWebinarDateValid,
-  validateEarliestSlot,
 } from "../../lib/campaignSchedule.js";
 import { formatUtcIsoMyt, REMINDER_SLOT_LABELS } from "../../lib/campaignFormat.js";
 import {
@@ -117,6 +122,7 @@ export function CampaignWizard({ vm }: CampaignWizardProps): ReactElement {
 
   const [reminderGroupJid, setReminderGroupJid] = useState("");
   const [reminderGroupName, setReminderGroupName] = useState("");
+  const [selectedSlotKeys, setSelectedSlotKeys] = useState<Set<string>>(new Set());
 
   const [templates, setTemplates] = useState<ReminderTemplateRow[]>([]);
   const [templatesLoading, setTemplatesLoading] = useState(false);
@@ -148,6 +154,73 @@ export function CampaignWizard({ vm }: CampaignWizardProps): ReactElement {
       return [];
     }
   }, [webinarDate, eventStartTimeMyt]);
+
+  const templatesBySlotKey = useMemo(() => {
+    const map = new Map<
+      string,
+      { reminderFormat: string; stickerUrl: string | null }
+    >();
+    for (const t of templates) {
+      map.set(t.slotKey, {
+        reminderFormat: t.reminderFormat,
+        stickerUrl: t.stickerUrl,
+      });
+    }
+    return map;
+  }, [templates]);
+
+  const schedulableSlotKeys = useMemo(() => {
+    if (showUpSlots.length === 0) {
+      return [];
+    }
+    return getSchedulableSlotKeys({
+      slots: showUpSlots,
+      templatesBySlotKey,
+    });
+  }, [showUpSlots, templatesBySlotKey]);
+
+  useEffect(() => {
+    if (showUpSlots.length === 0) {
+      setSelectedSlotKeys(new Set());
+      return;
+    }
+    setSelectedSlotKeys((prev) => {
+      const schedulableSet = new Set(schedulableSlotKeys);
+      if (prev.size === 0) {
+        return getDefaultSelectedSlotKeys(schedulableSlotKeys);
+      }
+      const next = new Set<string>();
+      for (const key of prev) {
+        if (schedulableSet.has(key)) {
+          next.add(key);
+        }
+      }
+      if (next.size === 0 && schedulableSet.size > 0) {
+        return getDefaultSelectedSlotKeys(schedulableSlotKeys);
+      }
+      return next;
+    });
+  }, [showUpSlots, schedulableSlotKeys]);
+
+  const skipSlotKeys = useMemo(
+    () => buildOperatorSkipSlotKeys(schedulableSlotKeys, selectedSlotKeys),
+    [schedulableSlotKeys, selectedSlotKeys],
+  );
+
+  const classifiedSlots = useMemo(() => {
+    if (showUpSlots.length === 0) {
+      return [];
+    }
+    return classifyCampaignSlots({
+      slots: showUpSlots,
+      skipSlotKeys,
+      templatesBySlotKey,
+    });
+  }, [showUpSlots, skipSlotKeys, templatesBySlotKey]);
+
+  const hasPastSlots = hasPastCampaignSlots(classifiedSlots);
+  const scheduledReminderCount = countScheduledCampaignSlots(classifiedSlots);
+  const skippedReminderCount = classifiedSlots.length - scheduledReminderCount;
 
   const loadTemplates = useCallback(async () => {
     if (!canUseApiRoutes) {
@@ -203,6 +276,22 @@ export function CampaignWizard({ vm }: CampaignWizardProps): ReactElement {
     setReminderGroupName(g !== undefined ? (g.label ?? g.name) : "");
   };
 
+  const toggleSlotSelection = (slotKey: string, checked: boolean): void => {
+    if (!schedulableSlotKeys.includes(slotKey)) {
+      return;
+    }
+    markDirty();
+    setSelectedSlotKeys((prev) => {
+      const next = new Set(prev);
+      if (checked) {
+        next.add(slotKey);
+      } else {
+        next.delete(slotKey);
+      }
+      return next;
+    });
+  };
+
   const updateZoomField = (key: keyof ZoomFields, value: string): void => {
     markDirty();
     setZoomFields((prev) => {
@@ -225,11 +314,7 @@ export function CampaignWizard({ vm }: CampaignWizardProps): ReactElement {
     if (!isValidZoomLink(zoomFields.zoomLink)) {
       return false;
     }
-    try {
-      return validateEarliestSlot(computeShowUpSlots(webinarDate, eventStartTimeMyt));
-    } catch {
-      return false;
-    }
+    return true;
   }, [webinarDate, eventStartTimeMyt, zoomFields]);
 
   const step2Valid = reminderGroupJid.length > 0 && vm.waConnected;
@@ -247,23 +332,10 @@ export function CampaignWizard({ vm }: CampaignWizardProps): ReactElement {
         return false;
       }
     }
-    return true;
-  }, [templates, customValues]);
-
-  const scheduledReminderCount = useMemo(
-    () =>
-      templates.filter((t) => {
-        if (t.reminderFormat === "STICKER") {
-          return t.stickerUrl !== null && t.stickerUrl.length > 0;
-        }
-        return templateReadyForCampaign(t);
-      }).length,
-    [templates],
-  );
+    return scheduledReminderCount > 0;
+  }, [templates, customValues, scheduledReminderCount]);
 
   const stepValid = [step1Valid, step2Valid, step3Valid, step3Valid][step - 1] ?? false;
-
-  const totalRows = scheduledReminderCount;
 
   const buildSchedulePayload = (): Record<string, unknown> => ({
     webinarDate,
@@ -273,6 +345,7 @@ export function CampaignWizard({ vm }: CampaignWizardProps): ReactElement {
     reminderGroupName,
     valuePosts: [],
     optionalValuePosts: [],
+    skipSlotKeys,
   });
 
   const submitCampaign = (): void => {
@@ -351,6 +424,14 @@ export function CampaignWizard({ vm }: CampaignWizardProps): ReactElement {
       {formError !== null ? (
         <Alert variant="destructive">
           <AlertDescription>{formError}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {hasPastSlots && webinarDate.length > 0 ? (
+        <Alert className="border-amber-300 bg-amber-50 text-amber-950 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100">
+          <AlertDescription>
+            Some slots are in the past and will be skipped.
+          </AlertDescription>
         </Alert>
       ) : null}
 
@@ -503,75 +584,124 @@ export function CampaignWizard({ vm }: CampaignWizardProps): ReactElement {
               </AlertDescription>
             </Alert>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b text-left text-xs uppercase tracking-wider text-muted-foreground">
-                    <th className="py-2 pr-3">Slot</th>
-                    <th className="py-2 pr-3">Send time (MYT)</th>
-                    <th className="py-2 pr-3">Asset</th>
-                    <th className="py-2">Preview</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {templates.map((t) => {
-                    const slotTime = showUpSlots.find((s) => s.slotKey === t.slotKey);
-                    const hasAsset = templateHasRequiredAssets(t);
-                    const isOptionalSticker = t.reminderFormat === "STICKER";
-                    const preview = mergePreviewForSlot(t, customValues);
-                    return (
-                      <tr key={t.slotKey} className="border-b last:border-0">
-                        <td className="py-3 pr-3 font-medium">
-                          {REMINDER_SLOT_LABELS[t.slotKey] ?? t.name}
-                        </td>
-                        <td className="py-3 pr-3 whitespace-nowrap">
-                          {slotTime !== undefined ? formatUtcIsoMyt(slotTime.scheduledAt) : "—"}
-                        </td>
-                        <td className="py-3 pr-3">
-                          {hasAsset ? (
-                            <Badge variant="outline" className="text-green-700 border-green-300">
-                              ✓
-                            </Badge>
-                          ) : isOptionalSticker ? (
-                            <Badge variant="secondary" className="text-xs font-normal">
-                              Skipped — no sticker yet
-                            </Badge>
-                          ) : (
-                            <Link
-                              to="/settings#reminder-templates"
-                              className="text-destructive text-xs font-medium hover:underline"
-                            >
-                              Missing — upload in Settings
-                            </Link>
-                          )}
-                        </td>
-                        <td className="py-3">
-                          <div className="flex items-start gap-2 max-w-md">
-                            {isOptionalSticker && !hasAsset ? (
-                              <span className="text-xs text-muted-foreground">
-                                Not scheduled until you upload a WebP in Settings.
+            <>
+              <p className="text-sm text-muted-foreground">
+                Choose which reminders to schedule. Past slots and the post-live sticker (when no
+                asset is uploaded) are unchecked automatically. Uncheck any future slot you already
+                sent manually.
+              </p>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-left text-xs uppercase tracking-wider text-muted-foreground">
+                      <th className="py-2 pr-3">Schedule</th>
+                      <th className="py-2 pr-3">Slot</th>
+                      <th className="py-2 pr-3">Send time (MYT)</th>
+                      <th className="py-2 pr-3">Status</th>
+                      <th className="py-2 pr-3">Asset</th>
+                      <th className="py-2">Preview</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {templates.map((t) => {
+                      const slotTime = showUpSlots.find((s) => s.slotKey === t.slotKey);
+                      const classified = classifiedSlots.find((s) => s.slotKey === t.slotKey);
+                      const hasAsset = templateHasRequiredAssets(t);
+                      const isOptionalSticker = t.reminderFormat === "STICKER";
+                      const preview = mergePreviewForSlot(t, customValues);
+                      const isScheduled = classified?.status === "scheduled";
+                      const isToggleable = schedulableSlotKeys.includes(t.slotKey);
+                      const isChecked = isToggleable && selectedSlotKeys.has(t.slotKey);
+                      return (
+                        <tr key={t.slotKey} className="border-b last:border-0">
+                          <td className="py-3 pr-3">
+                            <label className="flex items-center gap-2 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                disabled={!isToggleable}
+                                aria-label={`Schedule ${REMINDER_SLOT_LABELS[t.slotKey] ?? t.name}`}
+                                onChange={(e) => toggleSlotSelection(t.slotKey, e.target.checked)}
+                              />
+                              <span className="text-xs text-muted-foreground sr-only sm:not-sr-only">
+                                {isToggleable ? "Schedule" : "—"}
                               </span>
+                            </label>
+                          </td>
+                          <td className="py-3 pr-3 font-medium">
+                            {REMINDER_SLOT_LABELS[t.slotKey] ?? t.name}
+                          </td>
+                          <td className="py-3 pr-3 whitespace-nowrap">
+                            {slotTime !== undefined ? formatUtcIsoMyt(slotTime.scheduledAt) : "—"}
+                          </td>
+                          <td className="py-3 pr-3">
+                            {classified !== undefined ? (
+                              <Badge
+                                variant={isScheduled ? "outline" : "secondary"}
+                                className={cn(
+                                  "text-xs font-normal",
+                                  isScheduled && "text-green-700 border-green-300",
+                                )}
+                              >
+                                {classified.statusLabel}
+                              </Badge>
                             ) : (
-                              <>
-                                <TemplatePreviewThumb
-                                  template={t}
-                                  authorizedFetch={authorizedFetch}
-                                />
-                                {preview.ok && preview.text.length > 0 ? (
-                                  <p className="text-xs text-muted-foreground line-clamp-3">
-                                    {preview.text}
-                                  </p>
-                                ) : null}
-                              </>
+                              "—"
                             )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                          </td>
+                          <td className="py-3 pr-3">
+                            {hasAsset ? (
+                              <Badge variant="outline" className="text-green-700 border-green-300">
+                                ✓
+                              </Badge>
+                            ) : isOptionalSticker ? (
+                              <Badge variant="secondary" className="text-xs font-normal">
+                                Skipped — no sticker yet
+                              </Badge>
+                            ) : (
+                              <Link
+                                to="/settings#reminder-templates"
+                                className="text-destructive text-xs font-medium hover:underline"
+                              >
+                                Missing — upload in Settings
+                              </Link>
+                            )}
+                          </td>
+                          <td className="py-3">
+                            <div className="flex items-start gap-2 max-w-md">
+                              {isOptionalSticker && !hasAsset ? (
+                                <span className="text-xs text-muted-foreground">
+                                  Not scheduled until you upload a WebP in Settings.
+                                </span>
+                              ) : (
+                                <>
+                                  <TemplatePreviewThumb
+                                    template={t}
+                                    authorizedFetch={authorizedFetch}
+                                  />
+                                  {preview.ok && preview.text.length > 0 ? (
+                                    <p className="text-xs text-muted-foreground line-clamp-3">
+                                      {preview.text}
+                                    </p>
+                                  ) : null}
+                                </>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {scheduledReminderCount === 0 ? (
+                <p className="text-sm text-destructive">
+                  No reminder slots selected — at least one future slot must be scheduled.
+                </p>
+              ) : null}
+            </>
           )}
         </div>
       ) : null}
@@ -592,39 +722,73 @@ export function CampaignWizard({ vm }: CampaignWizardProps): ReactElement {
             </div>
           </dl>
 
+          <p className="text-sm text-muted-foreground">
+            Adjust which reminders to schedule before confirming. Uncheck slots you already sent
+            manually.
+          </p>
+
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b text-left text-xs uppercase tracking-wider text-muted-foreground">
+                  <th className="py-2 pr-2">Schedule</th>
                   <th className="py-2 pr-2">Slot</th>
                   <th className="py-2 pr-2">Time</th>
+                  <th className="py-2 pr-2">Status</th>
                 </tr>
               </thead>
               <tbody>
-                {showUpSlots
-                  .filter((s) => {
-                    const t = templates.find((row) => row.slotKey === s.slotKey);
-                    if (t === undefined) {
-                      return false;
-                    }
-                    if (t.reminderFormat === "STICKER") {
-                      return t.stickerUrl !== null && t.stickerUrl.length > 0;
-                    }
-                    return true;
-                  })
-                  .map((s) => (
+                {classifiedSlots.map((s) => {
+                  const isToggleable = schedulableSlotKeys.includes(s.slotKey);
+                  const isChecked = isToggleable && selectedSlotKeys.has(s.slotKey);
+                  return (
                     <tr key={s.slotKey} className="border-b">
+                      <td className="py-2 pr-2">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            disabled={!isToggleable}
+                            aria-label={`Schedule ${REMINDER_SLOT_LABELS[s.slotKey] ?? s.slotKey}`}
+                            onChange={(e) => toggleSlotSelection(s.slotKey, e.target.checked)}
+                          />
+                        </label>
+                      </td>
                       <td className="py-2 pr-2">{REMINDER_SLOT_LABELS[s.slotKey] ?? s.slotKey}</td>
                       <td className="py-2 pr-2 whitespace-nowrap">{formatUtcIsoMyt(s.scheduledAt)}</td>
+                      <td className="py-2 pr-2">
+                        <Badge
+                          variant={s.status === "scheduled" ? "outline" : "secondary"}
+                          className={cn(
+                            "text-xs font-normal",
+                            s.status === "scheduled" && "text-green-700 border-green-300",
+                          )}
+                        >
+                          {s.statusLabel}
+                        </Badge>
+                      </td>
                     </tr>
-                  ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
 
           <p className="text-sm font-medium">
-            Total: <strong>{String(totalRows)}</strong> reminder messages
+            Scheduling <strong>{String(scheduledReminderCount)}</strong> reminders
+            {skippedReminderCount > 0 ? (
+              <>
+                {" "}
+                (<strong>{String(skippedReminderCount)}</strong> skipped)
+              </>
+            ) : null}
           </p>
+
+          {scheduledReminderCount === 0 ? (
+            <p className="text-sm text-destructive">
+              No reminder slots selected — at least one future slot must be scheduled.
+            </p>
+          ) : null}
 
           <Button
             type="button"
@@ -667,16 +831,37 @@ export function CampaignWizard({ vm }: CampaignWizardProps): ReactElement {
           <DialogHeader>
             <DialogTitle>Schedule Show Up campaign?</DialogTitle>
             <DialogDescription>
-              Schedule <strong>{String(totalRows)}</strong> reminders to{" "}
-              <strong>{reminderGroupName}</strong>? Cancel individual rows from the Queue later if
-              needed.
+              Schedule <strong>{String(scheduledReminderCount)}</strong> reminders
+              {skippedReminderCount > 0 ? (
+                <>
+                  {" "}
+                  (<strong>{String(skippedReminderCount)}</strong> skipped)
+                </>
+              ) : null}{" "}
+              to <strong>{reminderGroupName}</strong>?
+              {skippedReminderCount > 0 ? (
+                <>
+                  {" "}
+                  Skipped slots:{" "}
+                  {classifiedSlots
+                    .filter((s) => s.status !== "scheduled")
+                    .map((s) => `${REMINDER_SLOT_LABELS[s.slotKey] ?? s.slotKey} (${s.statusLabel})`)
+                    .join(", ")}
+                  .
+                </>
+              ) : null}{" "}
+              Cancel individual rows from the Queue later if needed.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2">
             <Button type="button" variant="outline" onClick={() => setConfirmOpen(false)}>
               Cancel
             </Button>
-            <Button type="button" disabled={submitting} onClick={() => submitCampaign()}>
+            <Button
+              type="button"
+              disabled={submitting || scheduledReminderCount === 0}
+              onClick={() => submitCampaign()}
+            >
               {submitting ? "Scheduling…" : "Confirm schedule"}
             </Button>
           </DialogFooter>

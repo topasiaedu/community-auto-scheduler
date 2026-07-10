@@ -84,3 +84,15 @@ Append-only timeline of ingests, filed queries, and lint passes. Newest entries 
   - **§14 deploy smoke:** API `GET /health` 200 `{ ok: true }`; `GET /ready` `{ database: true, pgBoss: true }`. `GET /templates` → **404** (pre-P7 API on Render). Vercel production `READY` but latest deploy commit `9b1d29b` (docs only; local P7 waves uncommitted). `/schedule` + `/queue` return SPA shell 200; P7 wizard not in deployed bundle. Render MCP **unauthorized** (could not `list_deploys`).
 - Fixes made: none (no test/typecheck failures).
 - Manual steps: commit + push P7; run migration `20260708170000_p7_phase1_campaign_schema` on Render; redeploy API + web; re-auth Render MCP; campaign E2E on test project (2 Announcements communities); spot-check animated WebP upload + FAILED re-queue.
+
+## [2026-07-08] ingest | P7 campaign scheduler ship session
+
+- Raw: `raw/sources/2026-07-08-p7-campaign-scheduler-ship-session.md`
+- Wiki: [[wiki/sources/2026-07-08-p7-campaign-scheduler-ship-session]], [[wiki/overview]], [[wiki/concepts/value-vs-reminder-messages]], [[wiki/concepts/campaign-message-schedule]], [[index]]
+- Notes: Session wrap — pushed `8f7d1c1`. Campaign wizard = 4-step Show Up only; Value via Single message; SOP captions in `reminderTemplateDefaults`; sticker optional; Vite `envDir` + template-load flash fixes documented. Live E2E after Render/Vercel still open. Note: `p7-ux-spec` still describes older 5-step Value-in-campaign flow — prefer ship raw until UX spec revised.
+
+## [2026-07-10] ingest | P8 implementation briefs (agent prompts)
+
+- Raw: `raw/sources/2026-07-10-p8a-late-campaign-partial-schedule.md`, `raw/sources/2026-07-10-p8b-value-fan-out-active-communities.md`
+- Wiki: [[index]] only (wiki source pages deferred until post-implementation)
+- Notes: Operator-reported pain — campaign blocked when Welcome past; Value posts require per-community repeat. P8-A: auto-skip past reminder slots + explicit `skipSlotKeys` (Welcome checkbox), no schema. P8-B: `Project.activeCommunityJids`, Settings checkboxes, `POST /messages` Value `fanOut: true`. Each raw file includes copy-paste agent prompt sized for ~200k context. Duplicate community UX explicitly out of scope.

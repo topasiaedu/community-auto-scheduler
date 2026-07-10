@@ -44,7 +44,7 @@ From [[wiki/sources/2026-07-07-whatsapp-community-sop-dr-jasmine-show-up-referen
 | Value Post 2 | −1 day | 11:00 AM | Morning of 1-day before |
 | Value Post 3 | +1 day | 11:00 AM | Post-webinar follow-up |
 
-**Alternate-day rule:** On other pre-webinar days not in fixed slots, optional Value posts every alternate day @ 11:00 — intern opts in at campaign Step 4 ([[wiki/analysis/p7-ux-spec]] §4).
+**Value posts:** Not created by the Campaign (Show Up) wizard. Schedule via **Single message** (fan-out). Alternate-day SOP guidance remains operational advice; optional Value slots are not auto-created in v1 campaign flow ([[wiki/sources/2026-07-08-p7-campaign-scheduler-ship-session]]).
 
 ## Trigger model (two anchors)
 

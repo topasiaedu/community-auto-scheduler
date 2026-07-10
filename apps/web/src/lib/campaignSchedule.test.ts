@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildOperatorSkipSlotKeys,
+  classifyCampaignSlots,
   computeFixedValueSlots,
   computeShowUpSlots,
+  countScheduledCampaignSlots,
+  getDefaultSelectedSlotKeys,
+  getSchedulableSlotKeys,
+  hasPastCampaignSlots,
   suggestAlternateValueDays,
   validateEarliestSlot,
 } from "./campaignSchedule.js";
@@ -128,5 +134,127 @@ describe("validateEarliestSlot", () => {
   it("fails when now is after earliest slot", () => {
     const afterEarliest = earliestMs + 60 * 1000;
     expect(validateEarliestSlot(showUpSlots, { nowMs: afterEarliest })).toBe(false);
+  });
+});
+
+describe("classifyCampaignSlots", () => {
+  const showUpSlots = computeShowUpSlots(WEBINAR_DATE, EVENT_START);
+  const welcomeMs = new Date("2026-06-25T07:00:00.000Z").getTime();
+  const countdown2dMs = new Date("2026-06-27T07:00:00.000Z").getTime();
+
+  const templatesBySlotKey = new Map(
+    showUpSlots.map((slot) => [
+      slot.slotKey,
+      {
+        reminderFormat: slot.slotKey === "post_live_sticker" ? "STICKER" : "IMAGE",
+        stickerUrl: slot.slotKey === "post_live_sticker" ? null : null,
+      },
+    ]),
+  );
+
+  it("marks past welcome as skipped_past when 2-day is future", () => {
+    const nowMs = welcomeMs + 60_000;
+    const classified = classifyCampaignSlots({
+      slots: showUpSlots,
+      skipSlotKeys: [],
+      templatesBySlotKey,
+      nowMs,
+    });
+    const welcome = classified.find((s) => s.slotKey === "welcome");
+    const countdown2d = classified.find((s) => s.slotKey === "countdown_2d");
+    expect(welcome?.status).toBe("skipped_past");
+    expect(welcome?.statusLabel).toBe("Skipped (past)");
+    expect(countdown2d?.status).toBe("scheduled");
+    expect(countScheduledCampaignSlots(classified)).toBeGreaterThan(0);
+    expect(hasPastCampaignSlots(classified)).toBe(true);
+  });
+
+  it("marks explicit skip as skipped_chosen even when future", () => {
+    const nowMs = welcomeMs - 60_000;
+    const classified = classifyCampaignSlots({
+      slots: showUpSlots,
+      skipSlotKeys: ["welcome"],
+      templatesBySlotKey,
+      nowMs,
+    });
+    const welcome = classified.find((s) => s.slotKey === "welcome");
+    expect(welcome?.status).toBe("skipped_chosen");
+    expect(countScheduledCampaignSlots(classified)).toBeLessThan(6);
+  });
+
+  it("marks sticker without asset as skipped_no_sticker", () => {
+    const nowMs = countdown2dMs - 60_000;
+    const classified = classifyCampaignSlots({
+      slots: showUpSlots,
+      skipSlotKeys: [],
+      templatesBySlotKey,
+      nowMs,
+    });
+    const sticker = classified.find((s) => s.slotKey === "post_live_sticker");
+    expect(sticker?.status).toBe("skipped_no_sticker");
+  });
+
+  it("returns zero scheduled when all slots are past", () => {
+    const afterAll = new Date("2026-06-30T00:00:00.000Z").getTime();
+    const classified = classifyCampaignSlots({
+      slots: showUpSlots,
+      skipSlotKeys: [],
+      templatesBySlotKey,
+      nowMs: afterAll,
+    });
+    expect(countScheduledCampaignSlots(classified)).toBe(0);
+    expect(hasPastCampaignSlots(classified)).toBe(true);
+  });
+});
+
+describe("getSchedulableSlotKeys", () => {
+  const showUpSlots = computeShowUpSlots(WEBINAR_DATE, EVENT_START);
+  const welcomeMs = new Date("2026-06-25T07:00:00.000Z").getTime();
+
+  const templatesBySlotKey = new Map(
+    showUpSlots.map((slot) => [
+      slot.slotKey,
+      {
+        reminderFormat: slot.slotKey === "post_live_sticker" ? "STICKER" : "IMAGE",
+        stickerUrl: slot.slotKey === "post_live_sticker" ? null : null,
+      },
+    ]),
+  );
+
+  it("excludes past welcome when 2-day is future", () => {
+    const schedulable = getSchedulableSlotKeys({
+      slots: showUpSlots,
+      templatesBySlotKey,
+      nowMs: welcomeMs + 60_000,
+    });
+    expect(schedulable).not.toContain("welcome");
+    expect(schedulable).toContain("countdown_2d");
+    expect(schedulable).not.toContain("post_live_sticker");
+  });
+
+  it("includes all non-sticker slots when all are future", () => {
+    const schedulable = getSchedulableSlotKeys({
+      slots: showUpSlots,
+      templatesBySlotKey,
+      nowMs: welcomeMs - 60_000,
+    });
+    expect(schedulable).toContain("welcome");
+    expect(schedulable).toContain("countdown_2d");
+    expect(schedulable).not.toContain("post_live_sticker");
+    expect(schedulable).toHaveLength(5);
+  });
+});
+
+describe("buildOperatorSkipSlotKeys", () => {
+  it("returns unchecked schedulable slots only", () => {
+    const schedulable = ["welcome", "countdown_2d", "countdown_1d"];
+    const selected = new Set(["countdown_2d", "countdown_1d"]);
+    expect(buildOperatorSkipSlotKeys(schedulable, selected)).toEqual(["welcome"]);
+  });
+
+  it("returns empty when all schedulable slots are selected", () => {
+    const schedulable = ["welcome", "countdown_2d"];
+    const selected = getDefaultSelectedSlotKeys(schedulable);
+    expect(buildOperatorSkipSlotKeys(schedulable, selected)).toEqual([]);
   });
 });

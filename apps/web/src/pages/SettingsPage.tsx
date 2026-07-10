@@ -21,6 +21,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useNmcasVm } from "../context/NmcasVmContext.js";
 import { PageHeader } from "../components/PageHeader.js";
 import { ProjectLinksCard } from "../components/settings/ProjectLinksCard.js";
+import { ActiveCommunitiesCard } from "../components/settings/ActiveCommunitiesCard.js";
 import { ReminderTemplateLibrary } from "../components/settings/ReminderTemplateLibrary.js";
 
 export function SettingsPage(): ReactElement {
@@ -32,8 +33,10 @@ export function SettingsPage(): ReactElement {
   }, []);
 
   useEffect(() => {
-    if (window.location.hash === "#reminder-templates") {
-      const el = document.getElementById("reminder-templates");
+    const hash = window.location.hash;
+    if (hash === "#reminder-templates" || hash === "#active-communities") {
+      const id = hash.slice(1);
+      const el = document.getElementById(id);
       if (el !== null) {
         el.scrollIntoView({ behavior: "smooth", block: "start" });
       }
@@ -57,6 +60,8 @@ export function SettingsPage(): ReactElement {
     onCreateProject,
     loadProjects,
     onSignOut,
+    waConnected,
+    groups,
   } = vm;
 
   const selectedProject = projects.find((p) => p.id === selectedProjectId);
@@ -76,6 +81,14 @@ export function SettingsPage(): ReactElement {
       <ProjectLinksCard
         session={session}
         project={selectedProject}
+        onSaved={() => void loadProjects()}
+      />
+
+      <ActiveCommunitiesCard
+        session={session}
+        project={selectedProject}
+        waConnected={waConnected}
+        groups={groups}
         onSaved={() => void loadProjects()}
       />
 

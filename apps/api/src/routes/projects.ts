@@ -3,9 +3,18 @@
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { Prisma } from "@prisma/client";
 import type { PrismaClient } from "@nmcas/db";
 import { seedReminderTemplatesForProject } from "@nmcas/db";
 import { z } from "zod";
+import { parseActiveCommunityJids } from "../lib/valueFanOut.js";
+
+const MAX_ACTIVE_COMMUNITIES = 50;
+
+const ActiveCommunityJidsSchema = z
+  .array(z.string().trim().min(1).max(256))
+  .max(MAX_ACTIVE_COMMUNITIES)
+  .transform((jids) => [...new Set(jids)]);
 
 const CreateProjectBodySchema = z.object({
   name: z.string().min(1, "name is required").max(256),
@@ -16,10 +25,14 @@ const PatchProjectBodySchema = z
   .object({
     sopUrl: z.string().max(2048).nullable().optional(),
     campaignNote: z.string().max(4000).nullable().optional(),
+    activeCommunityJids: ActiveCommunityJidsSchema.nullable().optional(),
   })
   .refine(
-    (b) => b.sopUrl !== undefined || b.campaignNote !== undefined,
-    { message: "Provide sopUrl and/or campaignNote" },
+    (b) =>
+      b.sopUrl !== undefined ||
+      b.campaignNote !== undefined ||
+      b.activeCommunityJids !== undefined,
+    { message: "Provide sopUrl, campaignNote, and/or activeCommunityJids" },
   );
 
 function parseHttpUrl(value: string): boolean {
@@ -37,6 +50,7 @@ function projectToJson(p: {
   description: string | null;
   sopUrl: string | null;
   campaignNote: string | null;
+  activeCommunityJids: Prisma.JsonValue | null;
 }) {
   return {
     id: p.id,
@@ -44,6 +58,7 @@ function projectToJson(p: {
     description: p.description,
     sopUrl: p.sopUrl,
     campaignNote: p.campaignNote,
+    activeCommunityJids: parseActiveCommunityJids(p.activeCommunityJids),
   };
 }
 
@@ -109,12 +124,22 @@ export function registerProjectRoutes(app: FastifyInstance, prisma: PrismaClient
         return reply.code(400).send({ error: "sopUrl must be a valid http or https URL" });
       }
     }
-    const data: { sopUrl?: string | null; campaignNote?: string | null } = {};
+    const data: {
+      sopUrl?: string | null;
+      campaignNote?: string | null;
+      activeCommunityJids?: Prisma.InputJsonValue | typeof Prisma.DbNull;
+    } = {};
     if (parsed.data.sopUrl !== undefined) {
       data.sopUrl = parsed.data.sopUrl;
     }
     if (parsed.data.campaignNote !== undefined) {
       data.campaignNote = parsed.data.campaignNote;
+    }
+    if (parsed.data.activeCommunityJids !== undefined) {
+      data.activeCommunityJids =
+        parsed.data.activeCommunityJids === null
+          ? Prisma.DbNull
+          : parsed.data.activeCommunityJids;
     }
     const project = await prisma.project.update({
       where: { id },

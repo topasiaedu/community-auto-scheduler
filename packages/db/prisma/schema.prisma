@@ -49,9 +49,11 @@ model Project {
   id                String                  @id @default(cuid())
   name              String
   description       String?
-  sopUrl            String?
-  campaignNote      String?
-  createdAt         DateTime                @default(now())
+  sopUrl                String?
+  campaignNote          String?
+  /// WhatsApp community JIDs for Value fan-out; null or [] = all eligible communities.
+  activeCommunityJids   Json?
+  createdAt             DateTime                @default(now())
   messages          ScheduledMessage[]
   notifyRecipients  NotifyRecipient[]
   members           ProjectMember[]

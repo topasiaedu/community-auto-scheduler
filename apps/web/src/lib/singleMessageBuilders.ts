@@ -12,6 +12,7 @@ export type SingleMessageFields = {
   scheduledLocal: string;
   groupJid: string;
   groupName: string;
+  fanOut?: boolean;
   copyText: string;
   imagePath: string | null;
   pollQuestion: string;
@@ -69,6 +70,19 @@ export function buildSingleMessageBody(fields: SingleMessageFields): BuildResult
         error: `Caption must be at most ${String(WHATSAPP_POST_TEXT_MAX_CHARS)} characters.`,
       };
     }
+    if (fields.fanOut === true) {
+      return {
+        ok: true,
+        body: {
+          operatorKind: "VALUE",
+          valueFormat: "IMAGE_CAPTION",
+          fanOut: true,
+          copyText: fields.copyText.trim(),
+          imageUrl: fields.imagePath,
+          scheduledAt,
+        },
+      };
+    }
     return {
       ok: true,
       body: {
@@ -91,6 +105,18 @@ export function buildSingleMessageBody(fields: SingleMessageFields): BuildResult
       return {
         ok: false,
         error: `Message must be at most ${String(WHATSAPP_POST_TEXT_MAX_CHARS)} characters.`,
+      };
+    }
+    if (fields.fanOut === true) {
+      return {
+        ok: true,
+        body: {
+          operatorKind: "VALUE",
+          valueFormat: "TEXT_ONLY",
+          fanOut: true,
+          copyText: fields.copyText.trim(),
+          scheduledAt,
+        },
       };
     }
     return {
@@ -116,6 +142,20 @@ export function buildSingleMessageBody(fields: SingleMessageFields): BuildResult
   }
   if (trimmedOpts.length > 12) {
     return { ok: false, error: "WhatsApp allows at most 12 poll options." };
+  }
+  if (fields.fanOut === true) {
+    return {
+      ok: true,
+      body: {
+        operatorKind: "VALUE",
+        valueFormat: "POLL",
+        fanOut: true,
+        pollQuestion: trimmedQ,
+        pollOptions: trimmedOpts,
+        pollMultiSelect: fields.pollMultiSelect,
+        scheduledAt,
+      },
+    };
   }
   return {
     ok: true,

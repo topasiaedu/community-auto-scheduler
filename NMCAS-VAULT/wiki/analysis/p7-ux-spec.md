@@ -8,9 +8,13 @@ tags: ["nmcas", "p7", "ux", "api", "implementation"]
 
 # P7 UX & API spec — campaign scheduler
 
-**Status:** Locked — agents must follow this document for UI, API contracts, and validation.  
+**Status:** Partially superseded for campaign UX — see [[wiki/sources/2026-07-08-p7-campaign-scheduler-ship-session]]  
+**Shipped on main:** `8f7d1c1` (2026-07-08)
+
+> **Read first:** Campaign wizard is **4 steps (Show Up reminders only)** — Value posts are **Single message**, not campaign Step 4. SOP full captions live in `packages/db/src/reminderTemplateDefaults.ts`. Post-live sticker is **optional**. Sections below that still describe a 5-step Value-inclusive wizard are historical plan text until revised.
+
 **Companion:** [[wiki/analysis/p7-implementation-plan]] (phases, schema, worker).  
-**Ground truth:** [[wiki/sources/2026-07-07-whatsapp-community-sop-dr-jasmine-show-up-reference]].
+**Ground truth:** [[wiki/sources/2026-07-07-whatsapp-community-sop-dr-jasmine-show-up-reference]], ship session above.
 
 ---
 

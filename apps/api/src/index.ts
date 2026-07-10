@@ -128,7 +128,7 @@ async function main(): Promise<void> {
       registerWaRoutes(projectScope, waPool);
       registerTemplateRoutes(projectScope, prisma);
       registerCampaignRoutes(projectScope, { prisma, boss, waPool });
-      registerMessageRoutes(projectScope, { prisma, boss });
+      registerMessageRoutes(projectScope, { prisma, boss, waPool });
       registerPreferencesRoutes(projectScope, prisma);
       await registerUploadRoutes(projectScope, env);
     });

@@ -8,6 +8,12 @@ import PgBoss from "pg-boss";
 import { z } from "zod";
 import type { PrismaClient } from "@nmcas/db";
 import { SEND_SCHEDULED_MESSAGE_QUEUE } from "../queues.js";
+import { enqueueScheduledMessage } from "../lib/enqueueMessage.js";
+import {
+  parseActiveCommunityJids,
+  resolveValueFanOutDestinationsForProject,
+} from "../lib/valueFanOut.js";
+import type { WaConnectionPool } from "../wa/wa-pool.js";
 import {
   CustomValuesSchema,
   groupJidField,
@@ -48,6 +54,15 @@ const CreatePollMessageSchema = z.object({
   scheduledAt: scheduledAtField,
 });
 
+const CreateValueImageCaptionFanOutSchema = z.object({
+  operatorKind: z.literal("VALUE"),
+  valueFormat: z.literal("IMAGE_CAPTION"),
+  fanOut: z.literal(true),
+  copyText: z.string().trim().min(1).max(4096),
+  imageUrl: z.string().min(1).max(2048),
+  scheduledAt: scheduledAtField,
+});
+
 const CreateValueImageCaptionSchema = z.object({
   operatorKind: z.literal("VALUE"),
   valueFormat: z.literal("IMAGE_CAPTION"),
@@ -58,12 +73,33 @@ const CreateValueImageCaptionSchema = z.object({
   scheduledAt: scheduledAtField,
 });
 
+const CreateValueTextOnlyFanOutSchema = z.object({
+  operatorKind: z.literal("VALUE"),
+  valueFormat: z.literal("TEXT_ONLY"),
+  fanOut: z.literal(true),
+  copyText: z.string().trim().min(1).max(4096),
+  scheduledAt: scheduledAtField,
+});
+
 const CreateValueTextOnlySchema = z.object({
   operatorKind: z.literal("VALUE"),
   valueFormat: z.literal("TEXT_ONLY"),
   groupJid: groupJidField,
   groupName: groupNameField,
   copyText: z.string().trim().min(1).max(4096),
+  scheduledAt: scheduledAtField,
+});
+
+const CreateValuePollFanOutSchema = z.object({
+  operatorKind: z.literal("VALUE"),
+  valueFormat: z.literal("POLL"),
+  fanOut: z.literal(true),
+  pollQuestion: z.string().min(1).max(4096),
+  pollOptions: z
+    .array(z.string().min(1).max(256))
+    .min(2, "At least two poll options")
+    .max(12, "WhatsApp allows at most 12 poll options"),
+  pollMultiSelect: z.boolean(),
   scheduledAt: scheduledAtField,
 });
 
@@ -102,8 +138,11 @@ const CreateMessageBodySchema = z.preprocess((raw: unknown) => {
   return raw;
 }, z.union([
   CreateReminderSchema,
+  CreateValueImageCaptionFanOutSchema,
   CreateValueImageCaptionSchema,
+  CreateValueTextOnlyFanOutSchema,
   CreateValueTextOnlySchema,
+  CreateValuePollFanOutSchema,
   CreateValuePollSchema,
   CreatePostMessageSchema,
   CreatePollMessageSchema,
@@ -237,11 +276,25 @@ async function enqueueAndAttachJob(
   return jobId;
 }
 
+type ValueFanOutBody =
+  | z.infer<typeof CreateValueImageCaptionFanOutSchema>
+  | z.infer<typeof CreateValueTextOnlyFanOutSchema>
+  | z.infer<typeof CreateValuePollFanOutSchema>;
+
+function isValueFanOutBody(data: z.infer<typeof CreateMessageBodySchema>): data is ValueFanOutBody {
+  return (
+    "operatorKind" in data &&
+    data.operatorKind === "VALUE" &&
+    "fanOut" in data &&
+    data.fanOut === true
+  );
+}
+
 export function registerMessageRoutes(
   app: FastifyInstance,
-  deps: { prisma: PrismaClient; boss: PgBossInstance },
+  deps: { prisma: PrismaClient; boss: PgBossInstance; waPool: WaConnectionPool },
 ): void {
-  const { prisma, boss } = deps;
+  const { prisma, boss, waPool } = deps;
 
   app.post("/messages", async (req: FastifyRequest, reply: FastifyReply) => {
     const body = CreateMessageBodySchema.safeParse(req.body);
@@ -268,10 +321,116 @@ export function registerMessageRoutes(
     }
 
     const createdByUserId = req.authUserId ?? null;
+    const messageBody = body.data;
+
+    if (isValueFanOutBody(messageBody)) {
+      const fanOutBody = messageBody;
+      const wa = waPool.getManager(projectId);
+      await wa.start();
+      const sendReady = await wa.isSendReady();
+      if (!sendReady) {
+        return reply.code(409).send({ error: "WhatsApp is not connected" });
+      }
+      const groups = await wa.fetchGroupOptions();
+      const activeCommunityJids = parseActiveCommunityJids(project.activeCommunityJids);
+      const { destinations, count } = resolveValueFanOutDestinationsForProject(
+        groups,
+        activeCommunityJids,
+      );
+      if (count === 0) {
+        return reply.code(422).send({
+          error:
+            "No active communities with an Announcements channel. Check Settings or WhatsApp connection.",
+        });
+      }
+      if (fanOutBody.valueFormat === "IMAGE_CAPTION") {
+        const postsPrefix = `posts/${projectId}/`;
+        if (!fanOutBody.imageUrl.startsWith(postsPrefix)) {
+          return reply.code(400).send({ error: "Value post imageUrl must be under posts/{projectId}/" });
+        }
+      }
+
+      const messageIds: string[] = [];
+      try {
+        const fanOutResult = await prisma.$transaction(async (tx) => {
+          for (const dest of destinations) {
+            const shared = {
+              projectId,
+              groupJid: dest.groupJid,
+              groupName: dest.groupName,
+              scheduledAt,
+              status: "PENDING" as const,
+              createdByUserId,
+              operatorKind: "VALUE" as const,
+            };
+            const row =
+              fanOutBody.valueFormat === "IMAGE_CAPTION"
+                ? await tx.scheduledMessage.create({
+                    data: {
+                      ...shared,
+                      type: "POST",
+                      valueFormat: "IMAGE_CAPTION",
+                      copyText: fanOutBody.copyText,
+                      imageUrl: fanOutBody.imageUrl,
+                      stickerUrl: null,
+                      pollQuestion: null,
+                      pollOptions: [],
+                      pollMultiSelect: false,
+                    },
+                  })
+                : fanOutBody.valueFormat === "TEXT_ONLY"
+                  ? await tx.scheduledMessage.create({
+                      data: {
+                        ...shared,
+                        type: "POST",
+                        valueFormat: "TEXT_ONLY",
+                        copyText: fanOutBody.copyText,
+                        imageUrl: null,
+                        stickerUrl: null,
+                        pollQuestion: null,
+                        pollOptions: [],
+                        pollMultiSelect: false,
+                      },
+                    })
+                  : await tx.scheduledMessage.create({
+                      data: {
+                        ...shared,
+                        type: "POLL",
+                        valueFormat: "POLL",
+                        copyText: null,
+                        imageUrl: null,
+                        stickerUrl: null,
+                        pollQuestion: fanOutBody.pollQuestion.trim(),
+                        pollOptions: fanOutBody.pollOptions.map((o: string) => o.trim()),
+                        pollMultiSelect: fanOutBody.pollMultiSelect,
+                      },
+                    });
+            messageIds.push(row.id);
+            await enqueueScheduledMessage(boss, tx, row.id, scheduledAt);
+          }
+          return {
+            fanOutCount: count,
+            destinations: destinations.map((d) => d.groupName),
+          };
+        });
+        return reply.code(201).send({
+          messageIds,
+          fanOutCount: fanOutResult.fanOutCount,
+          destinations: fanOutResult.destinations,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Value fan-out schedule failed";
+        if (message.includes("enqueue")) {
+          return reply.code(500).send({ error: message });
+        }
+        throw err;
+      }
+    }
+
     const baseRow = {
       projectId,
-      groupJid: body.data.groupJid,
-      groupName: body.data.groupName,
+      groupJid: "groupJid" in messageBody ? messageBody.groupJid : "",
+      groupName: "groupName" in messageBody ? messageBody.groupName : "",
       scheduledAt,
       status: "PENDING" as const,
       createdByUserId,

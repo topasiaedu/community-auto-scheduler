@@ -46,6 +46,38 @@ export type ValidateEarliestSlotOptions = {
   nowMs?: number;
 };
 
+export type CampaignSlotUiStatus =
+  | "scheduled"
+  | "skipped_past"
+  | "skipped_chosen"
+  | "skipped_no_sticker";
+
+export const CAMPAIGN_SLOT_STATUS_LABELS: Record<CampaignSlotUiStatus, string> = {
+  scheduled: "Scheduled",
+  skipped_past: "Skipped (past)",
+  skipped_chosen: "Skipped (you chose)",
+  skipped_no_sticker: "Skipped (no sticker)",
+};
+
+export type ClassifiedCampaignSlot = {
+  slotKey: string;
+  scheduledAt: string;
+  status: CampaignSlotUiStatus;
+  statusLabel: string;
+};
+
+export type ClassifyCampaignSlotsTemplate = {
+  reminderFormat: string;
+  stickerUrl: string | null;
+};
+
+export type ClassifyCampaignSlotsInput = {
+  slots: readonly CampaignScheduledSlot[];
+  skipSlotKeys: readonly string[];
+  templatesBySlotKey: ReadonlyMap<string, ClassifyCampaignSlotsTemplate>;
+  nowMs?: number;
+};
+
 const YMD_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const HH_MM_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
@@ -259,4 +291,91 @@ export function validateEarliestSlot(
   }
 
   return isUtcIsoAtLeastSecondsAhead(earliestIso, MIN_LEAD_SECONDS);
+}
+
+/**
+ * Classifies each Show Up slot for review / confirm UI (P8-A partial scheduling).
+ */
+export function classifyCampaignSlots(input: ClassifyCampaignSlotsInput): ClassifiedCampaignSlot[] {
+  const nowMs = input.nowMs ?? Date.now();
+  const minTime = nowMs + MIN_LEAD_SECONDS * 1000;
+  const skipSet = new Set(input.skipSlotKeys);
+
+  return input.slots.map((slot) => {
+    const template = input.templatesBySlotKey.get(slot.slotKey);
+    let status: CampaignSlotUiStatus;
+
+    if (skipSet.has(slot.slotKey)) {
+      status = "skipped_chosen";
+    } else if (
+      template !== undefined &&
+      template.reminderFormat === "STICKER" &&
+      (template.stickerUrl === null || template.stickerUrl.length === 0)
+    ) {
+      status = "skipped_no_sticker";
+    } else if (new Date(slot.scheduledAt).getTime() < minTime) {
+      status = "skipped_past";
+    } else {
+      status = "scheduled";
+    }
+
+    return {
+      slotKey: slot.slotKey,
+      scheduledAt: slot.scheduledAt,
+      status,
+      statusLabel: CAMPAIGN_SLOT_STATUS_LABELS[status],
+    };
+  });
+}
+
+/**
+ * True when any slot would be auto-skipped because its time has passed.
+ */
+export function hasPastCampaignSlots(
+  classified: readonly ClassifiedCampaignSlot[],
+): boolean {
+  return classified.some((slot) => slot.status === "skipped_past");
+}
+
+/**
+ * Count of slots that will create reminder rows.
+ */
+export function countScheduledCampaignSlots(
+  classified: readonly ClassifiedCampaignSlot[],
+): number {
+  return classified.filter((slot) => slot.status === "scheduled").length;
+}
+
+/**
+ * Slot keys that would be scheduled without operator skip (future + sticker asset when required).
+ */
+export function getSchedulableSlotKeys(
+  input: Omit<ClassifyCampaignSlotsInput, "skipSlotKeys">,
+): string[] {
+  const classified = classifyCampaignSlots({
+    ...input,
+    skipSlotKeys: [],
+  });
+  return classified
+    .filter((slot) => slot.status === "scheduled")
+    .map((slot) => slot.slotKey);
+}
+
+/**
+ * Builds skipSlotKeys from operator-unchecked schedulable slots.
+ */
+export function buildOperatorSkipSlotKeys(
+  schedulableSlotKeys: readonly string[],
+  selectedSlotKeys: ReadonlySet<string>,
+): string[] {
+  return schedulableSlotKeys.filter((key) => !selectedSlotKeys.has(key));
+}
+
+/**
+ * Default selected slot keys — all schedulable slots checked on first load.
+ */
+export function getDefaultSelectedSlotKeys(
+  schedulableSlotKeys: readonly string[],
+): Set<string> {
+  return new Set(schedulableSlotKeys);
 }

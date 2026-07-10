@@ -10,17 +10,22 @@ import type { CampaignCustomValues, PrismaClient, ReminderTemplate } from "@nmca
 import {
   hasUnresolvedPlaceholders,
   mergeTemplate,
+  REMINDER_TEMPLATE_SLOT_DEFINITIONS,
 } from "@nmcas/db";
 import { ensureReminderTemplates } from "../lib/ensureReminderTemplates.js";
 import {
   computeOptionalValueTime,
   computeReminderSlotTime,
   computeValueSlotTime,
-  earliestCampaignSlotTime,
   isWebinarDateValid,
 } from "../lib/campaignSchedule.js";
+import {
+  CAMPAIGN_MIN_LEAD_MS,
+  classifyReminderSlot,
+  type SkippedCampaignSlot,
+} from "../lib/campaignSlotSkip.js";
 import { enqueueScheduledMessage } from "../lib/enqueueMessage.js";
-import { resolveValueFanOutDestinations } from "../lib/valueFanOut.js";
+import { resolveValueFanOutDestinationsForProject, parseActiveCommunityJids } from "../lib/valueFanOut.js";
 import type { WaConnectionPool } from "../wa/wa-pool.js";
 
 type PgBossInstance = InstanceType<typeof PgBoss>;
@@ -64,6 +69,13 @@ const OptionalValuePostSchema = z.object({
   copyText: z.string().trim().min(1).max(4096),
 });
 
+const reminderSlotKeyEnum = z.enum(
+  REMINDER_TEMPLATE_SLOT_DEFINITIONS.map((s) => s.slotKey) as [
+    string,
+    ...string[],
+  ],
+);
+
 const ScheduleCampaignBodySchema = z.object({
   webinarDate: dateYmdField,
   eventStartTimeMyt: timeMytField,
@@ -72,6 +84,7 @@ const ScheduleCampaignBodySchema = z.object({
   reminderGroupName: z.string().min(1).max(512),
   valuePosts: z.array(ValuePostSchema).optional().default([]),
   optionalValuePosts: z.array(OptionalValuePostSchema).optional().default([]),
+  skipSlotKeys: z.array(reminderSlotKeyEnum).optional().default([]),
 });
 
 function customValuesToJson(values: CampaignCustomValues): Prisma.InputJsonValue {
@@ -108,13 +121,6 @@ function validateTemplateAssets(template: ReminderTemplate): string | undefined 
     return undefined;
   }
   return `Unknown format for template "${template.slotKey}"`;
-}
-
-function shouldScheduleTemplate(template: ReminderTemplate): boolean {
-  if (template.reminderFormat === "STICKER") {
-    return template.stickerUrl !== null && template.stickerUrl.length > 0;
-  }
-  return true;
 }
 
 function validateMergedCopy(
@@ -158,13 +164,6 @@ export function registerCampaignRoutes(
 
     if (!isWebinarDateValid(body.webinarDate)) {
       return reply.code(400).send({ error: "webinarDate must be today or in the future (MYT)" });
-    }
-    const earliest = earliestCampaignSlotTime(body.webinarDate);
-    const minTime = new Date(Date.now() + 15_000);
-    if (earliest.getTime() < minTime.getTime()) {
-      return reply
-        .code(400)
-        .send({ error: "Earliest campaign slot must be at least ~15 seconds in the future" });
     }
 
     const postsPrefix = `posts/${projectId}/`;
@@ -213,10 +212,19 @@ export function registerCampaignRoutes(
       return reply.code(409).send({ error: "WhatsApp is not connected" });
     }
 
+    const project = await prisma.project.findUnique({ where: { id: projectId } });
+    if (project === null) {
+      return reply.code(500).send({ error: `Project "${projectId}" not found` });
+    }
+
     const groups = await wa.fetchGroupOptions();
     const hasValuePosts =
       body.valuePosts.length > 0 || body.optionalValuePosts.length > 0;
-    const { destinations, count } = resolveValueFanOutDestinations(groups);
+    const activeCommunityJids = parseActiveCommunityJids(project.activeCommunityJids);
+    const { destinations, count } = resolveValueFanOutDestinationsForProject(
+      groups,
+      activeCommunityJids,
+    );
     if (hasValuePosts && count === 0) {
       return reply
         .code(422)
@@ -225,6 +233,36 @@ export function registerCampaignRoutes(
 
     const webinarDate = new Date(`${body.webinarDate}T12:00:00+08:00`);
     const messageIds: string[] = [];
+    const nowMs = Date.now();
+    const minTime = new Date(nowMs + CAMPAIGN_MIN_LEAD_MS);
+    const skipSlotKeySet = new Set(body.skipSlotKeys);
+    const skippedSlots: SkippedCampaignSlot[] = [];
+    let schedulableReminderCount = 0;
+
+    for (const template of templates) {
+      const scheduledAt = computeReminderSlotTime(
+        template,
+        body.webinarDate,
+        body.eventStartTimeMyt,
+      );
+      const decision = classifyReminderSlot({
+        template,
+        scheduledAt,
+        nowMs,
+        skipSlotKeys: skipSlotKeySet,
+      });
+      if (decision.schedule) {
+        schedulableReminderCount += 1;
+      } else {
+        skippedSlots.push({ slotKey: template.slotKey, reason: decision.reason });
+      }
+    }
+
+    if (schedulableReminderCount === 0) {
+      return reply
+        .code(400)
+        .send({ error: "No reminder slots are still in the future for this webinar date" });
+    }
 
     try {
       const result = await prisma.$transaction(async (tx) => {
@@ -241,17 +279,19 @@ export function registerCampaignRoutes(
 
         let reminderCount = 0;
         for (const template of templates) {
-          if (!shouldScheduleTemplate(template)) {
-            continue;
-          }
-
           const scheduledAt = computeReminderSlotTime(
             template,
             body.webinarDate,
             body.eventStartTimeMyt,
           );
-          if (scheduledAt.getTime() < minTime.getTime()) {
-            throw new Error(`Slot "${template.slotKey}" is in the past`);
+          const decision = classifyReminderSlot({
+            template,
+            scheduledAt,
+            nowMs,
+            skipSlotKeys: skipSlotKeySet,
+          });
+          if (!decision.schedule) {
+            continue;
           }
 
           let copyText: string | null = null;
@@ -355,6 +395,7 @@ export function registerCampaignRoutes(
         campaignId: result.campaignId,
         messageIds,
         reminderCount: result.reminderCount,
+        skippedSlots,
         valueCount: result.valueCount,
         fanOutDestinations: result.fanOutDestinations,
       });

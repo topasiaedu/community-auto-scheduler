@@ -20,6 +20,9 @@ Catalog of all wiki pages. Updated after every ingest, filed query, or lint pass
 - [[wiki/sources/2026-04-21-stability-hardening-session]] — Stability hardening: duplicate-send root cause, rescue sweep, timeout→FAILED fix, requeue route, race guards, Baileys silent logger.
 - [[wiki/sources/2026-07-06-whatsmeow-deploy-product-ux-session]] — whatsmeow migration, Render/Vercel production, Value vs Reminder model, intern UX plan (P7, not implemented).
 - [[wiki/sources/2026-07-07-whatsapp-community-sop-dr-jasmine-show-up-reference]] — Saved SOP assets; six message slots with exact triggers; corrects welcome + timing paraphrase.
+- [[wiki/sources/2026-07-08-p7-campaign-scheduler-ship-session]] — P7 shipped to main (`8f7d1c1`); 4-step Show Up wizard; SOP captions; optional sticker; live E2E pending.
+- `raw/sources/2026-07-10-p8a-late-campaign-partial-schedule.md` — P8-A agent brief: skip past / explicit Welcome skip for Show Up campaigns.
+- `raw/sources/2026-07-10-p8b-value-fan-out-active-communities.md` — P8-B agent brief: Value fan-out from Single message + active communities in Settings.
 
 ---
 
@@ -49,4 +52,4 @@ Catalog of all wiki pages. Updated after every ingest, filed query, or lint pass
 
 ---
 
-*Last indexed: 2026-07-08 — P7 UX spec filed; wiki contradictions reconciled.*
+*Last indexed: 2026-07-10 — P8-A / P8-B implementation briefs added to raw.*

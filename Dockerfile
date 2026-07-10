@@ -13,6 +13,7 @@ RUN apt-get update \
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY packages ./packages
 COPY apps ./apps
+COPY scripts ./scripts
 
 RUN npm ci \
   && npm run build:api

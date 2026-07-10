@@ -1,2 +1,2 @@
 -- AlterTable
-ALTER TABLE "Project" ADD COLUMN "activeCommunityJids" JSONB;
+ALTER TABLE "Project" ADD COLUMN IF NOT EXISTS "activeCommunityJids" JSONB;

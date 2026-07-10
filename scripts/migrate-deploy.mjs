@@ -1,27 +1,17 @@
 /**
- * Runs `prisma migrate deploy` in packages/db after loading the same env files as the API.
+ * Baselines existing prod schema if needed, then runs `prisma migrate deploy`.
  */
 
-import { config } from "dotenv";
-import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { baselineMigrationsIfNeeded } from "./baseline-migrations.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-
-const envPaths = [
-  resolve(root, ".env"),
-  resolve(root, "apps", "api", ".env"),
-];
-
-for (const path of envPaths) {
-  if (existsSync(path)) {
-    config({ path, override: true });
-  }
-}
-
 const dbDir = resolve(root, "packages", "db");
+
+await baselineMigrationsIfNeeded();
+
 const result = spawnSync(
   "npx",
   ["prisma", "migrate", "deploy"],

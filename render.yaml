@@ -1,0 +1,33 @@
+# Render Blueprint for the NMCAS API.
+# Sync via Dashboard → Blueprints, or create a new Docker web service from this file.
+#
+# IMPORTANT: Do not set dockerCommand on the service — Dockerfile ENTRYPOINT runs
+# baseline + migrate deploy via docker-entrypoint.sh. A dashboard dockerCommand
+# override was bypassing the 7360eb7 baseline fix and caused P3005.
+
+services:
+  - type: web
+    name: community-auto-scheduler
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: WEB_ORIGIN
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: NMCAS_POST_MEDIA_BUCKET
+        sync: false
+      - key: DEFAULT_PROJECT_ID
+        value: nmcas-default-project

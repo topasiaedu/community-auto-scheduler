@@ -63,11 +63,23 @@ async function columnExists(prisma, tableName, columnName) {
 }
 
 /**
+ * True when Prisma migration history exists and has at least one row.
+ * An empty `_prisma_migrations` table still needs baselining (P3005).
+ *
  * @param {PrismaClient} prisma
  * @returns {Promise<boolean>}
  */
-async function migrationsTableExists(prisma) {
-  return tableExists(prisma, "_prisma_migrations");
+async function hasMigrationHistory(prisma) {
+  if (!(await tableExists(prisma, "_prisma_migrations"))) {
+    return false;
+  }
+
+  const rows = await prisma.$queryRaw`
+    SELECT COUNT(*)::int AS "count"
+    FROM "_prisma_migrations"
+  `;
+  const row = rows[0];
+  return row !== undefined && row.count > 0;
 }
 
 /**
@@ -152,8 +164,8 @@ export async function baselineMigrationsIfNeeded() {
 
   const prisma = new PrismaClient();
   try {
-    if (await migrationsTableExists(prisma)) {
-      console.log("baseline-migrations: _prisma_migrations exists; skipping baseline");
+    if (await hasMigrationHistory(prisma)) {
+      console.log("baseline-migrations: migration history present; skipping baseline");
       return;
     }
 

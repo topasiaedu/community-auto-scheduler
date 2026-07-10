@@ -29,4 +29,6 @@ ENV NODE_OPTIONS="--max-old-space-size=432"
 
 EXPOSE 3001
 
-CMD ["/app/docker-entrypoint.sh"]
+# ENTRYPOINT (not CMD) so Render dashboard dockerCommand overrides cannot skip
+# baseline + migrate deploy in docker-entrypoint.sh.
+ENTRYPOINT ["/app/docker-entrypoint.sh"]

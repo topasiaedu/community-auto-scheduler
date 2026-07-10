@@ -12,7 +12,9 @@ Hosting matches [`NMCAS-VAULT/wiki/overview.md`](NMCAS-VAULT/wiki/overview.md): 
 
 ## 1. Render — API with **Docker** (no Blueprint)
 
-The repo includes a root [`Dockerfile`](Dockerfile): it runs `npm ci`, `npm run build:api`, then at **container start** runs `prisma migrate deploy` and `node apps/api/dist/index.js`. You do **not** need a Render Blueprint file.
+The repo includes a root [`Dockerfile`](Dockerfile): it runs `npm ci`, `npm run build:api`, then at **container start** runs [`scripts/migrate-deploy.mjs`](scripts/migrate-deploy.mjs) (baseline + `prisma migrate deploy`) via [`docker-entrypoint.sh`](docker-entrypoint.sh), then `node apps/api/dist/index.js`.
+
+Optional: root [`render.yaml`](render.yaml) documents the intended Docker web service. If you created the service manually, ensure **Docker Command** in the Render dashboard is **empty** so the image `ENTRYPOINT` runs — a custom `dockerCommand` bypasses the baseline fix and causes P3005.
 
 ### Create the Web Service
 
@@ -95,6 +97,6 @@ Redeploy after changing env vars so Vite embeds them at build time.
 ## 4. Common issues
 
 - **CORS:** `WEB_ORIGIN` must include the exact Vercel origin (`https://…`).
-- **Migrations:** Fail at **container start** if `DATABASE_URL` is wrong; check Render logs for `prisma migrate deploy` errors.
+- **Migrations:** Fail at **container start** if `DATABASE_URL` is wrong; check Render logs for `migrate-deploy:` / `baseline-migrations:` lines, then `prisma migrate deploy` errors. If you see raw Prisma output with no `migrate-deploy:` banner, the service is **not** using `docker-entrypoint.sh` — clear **Docker Command** in the Render dashboard (or use [`render.yaml`](render.yaml) with no `dockerCommand`). For **native Node** services, set start command to `npm start` (root `package.json` runs baseline + deploy before the API).
 - **Free tier sleep:** Not suitable for dependable cron-like behaviour; upgrade when you need reliability.
 - **Mixed content:** Vercel is HTTPS; `VITE_API_URL` must be `https://`, not `http://`.

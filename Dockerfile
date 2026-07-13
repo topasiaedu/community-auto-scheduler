@@ -22,10 +22,10 @@ COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh
 
 ENV NODE_ENV=production
-# Give V8 a soft heap ceiling below the container RAM so the GC runs before OOM kills the process.
-# Render free (512 MB RAM): reserve ~80 MB for OS/native libs → 432 MB for Node heap.
-# Adjust if you upgrade to a larger instance.
-ENV NODE_OPTIONS="--max-old-space-size=432"
+# Cap V8 heap well below container RAM so native whatsmeow (Go) RSS + SQLite/media buffers fit.
+# Render free/Starter (512 MB): ~256 MB heap leaves room for OS + Go subprocess (~15–40 MB) + spikes.
+# On Standard (2 GB) you can raise this (e.g. 1536) via Render env override.
+ENV NODE_OPTIONS="--max-old-space-size=256"
 
 EXPOSE 3001
 

@@ -131,9 +131,16 @@ export class WaManager {
   /** Periodic blob upload while linked (session keys rotate). */
   private persistTimer: ReturnType<typeof setInterval> | undefined;
 
+  /** Local SQLite fingerprint after last successful blob upload (skip unchanged persists). */
+  private lastPersistMeta: { size: number; mtimeMs: number } | undefined;
+
+  /** Last API/worker touch — used by `WaConnectionPool` idle eviction. */
+  private lastActivityAtMs: number = Date.now();
+
   private static readonly GROUP_CACHE_TTL_MS = 5 * 60_000;
 
-  private static readonly PERSIST_INTERVAL_MS = 60_000;
+  /** Was 60s; 8MB session re-read every minute caused avoidable heap spikes on 512MB. */
+  private static readonly PERSIST_INTERVAL_MS = 5 * 60_000;
 
   constructor(env: ApiEnv, prisma: PrismaClient, projectId: string) {
     const trimmed = projectId.trim();
@@ -153,10 +160,28 @@ export class WaManager {
     return this.latestQr;
   }
 
+  /** Epoch ms of the last start/send/status touch (for idle eviction). */
+  getLastActivityAtMs(): number {
+    return this.lastActivityAtMs;
+  }
+
+  /** Marks the manager as recently used so the pool does not idle-evict it. */
+  touchActivity(): void {
+    this.lastActivityAtMs = Date.now();
+  }
+
+  /**
+   * True while a QR is on screen — pool must not idle-evict mid-scan.
+   */
+  isQrLinkInProgress(): boolean {
+    return this.getLatestQr() !== undefined;
+  }
+
   /**
    * Ensures the client is booting or connected.
    */
   start(): Promise<void> {
+    this.touchActivity();
     this.waOpChain = this.waOpChain
       .then(() => this.ensureRunning())
       .catch((err: unknown) => {
@@ -185,6 +210,7 @@ export class WaManager {
    * Groups the linked account participates in (for schedule UI picker).
    */
   async fetchGroupOptions(forceRefresh = false): Promise<WaGroupOption[]> {
+    this.touchActivity();
     const cached = this.groupCache;
     if (
       !forceRefresh &&
@@ -390,6 +416,7 @@ export class WaManager {
   }
 
   async sendPost(groupJid: string, text: string, imageBuffer: Buffer | undefined, mimetype: string): Promise<void> {
+    this.touchActivity();
     const client = this.client;
     if (client === undefined) {
       throw new Error("WhatsApp client is not initialized");
@@ -409,6 +436,7 @@ export class WaManager {
     options: string[],
     selectableCount: number,
   ): Promise<void> {
+    this.touchActivity();
     const client = this.client;
     if (client === undefined) {
       throw new Error("WhatsApp client is not initialized");
@@ -417,6 +445,7 @@ export class WaManager {
   }
 
   async sendSticker(groupJid: string, stickerBuffer: Buffer): Promise<void> {
+    this.touchActivity();
     const client = this.client;
     if (client === undefined) {
       throw new Error("WhatsApp client is not initialized");
@@ -427,6 +456,7 @@ export class WaManager {
   }
 
   async sendDirectText(msisdnJid: string, text: string): Promise<void> {
+    this.touchActivity();
     const client = this.client;
     if (client === undefined) {
       throw new Error("WhatsApp client is not initialized");
@@ -478,6 +508,7 @@ export class WaManager {
 
   private async performResetSessionForLinking(): Promise<void> {
     this.stopPersistTimer();
+    this.lastPersistMeta = undefined;
     const existing = this.client;
     this.client = undefined;
     this.latestQr = undefined;
@@ -642,7 +673,12 @@ export class WaManager {
 
   private async safePersist(): Promise<void> {
     try {
-      await persistWhatsAppSessionToBlob(this.prisma, this.env, this.projectId);
+      const meta = await persistWhatsAppSessionToBlob(this.prisma, this.env, this.projectId, {
+        skipIfUnchanged: this.lastPersistMeta,
+      });
+      if (meta !== null) {
+        this.lastPersistMeta = meta;
+      }
     } catch (err: unknown) {
       console.error(`[WaManager] persist session failed projectId=${this.projectId}:`, err);
     }

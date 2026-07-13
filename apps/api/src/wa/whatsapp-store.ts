@@ -4,7 +4,7 @@
  * (Supabase pooler ignores `search_path`; direct `db.*` hosts are often IPv6-only on Render).
  */
 
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { PrismaClient } from "@nmcas/db";
@@ -146,26 +146,59 @@ export async function hydrateWhatsAppSessionFromBlob(
   );
 }
 
+/** Local file fingerprint used to skip unchanged session blob uploads. */
+export type WhatsAppSessionPersistMeta = {
+  size: number;
+  mtimeMs: number;
+};
+
 /**
  * Uploads the local SQLite file to Postgres so the session survives deploys / restarts.
+ * When `skipIfUnchanged` matches the on-disk size+mtime, skips the read/upsert (no heap spike).
+ *
+ * @returns New fingerprint after a write, previous fingerprint when skipped, or null if no file.
  */
 export async function persistWhatsAppSessionToBlob(
   prisma: PrismaClient,
   env: ApiEnv,
   projectId: string,
-): Promise<void> {
+  options?: { skipIfUnchanged?: WhatsAppSessionPersistMeta },
+): Promise<WhatsAppSessionPersistMeta | null> {
   const dbPath = resolveSqliteSessionPath(env, projectId);
+  let fileStat: { size: number; mtimeMs: number };
+  try {
+    const st = await stat(dbPath);
+    fileStat = { size: st.size, mtimeMs: st.mtimeMs };
+  } catch (err: unknown) {
+    if (isNodeFsError(err) && err.code === "ENOENT") {
+      return null;
+    }
+    throw err;
+  }
+  if (fileStat.size === 0) {
+    return null;
+  }
+
+  const previous = options?.skipIfUnchanged;
+  if (
+    previous !== undefined &&
+    previous.size === fileStat.size &&
+    previous.mtimeMs === fileStat.mtimeMs
+  ) {
+    return previous;
+  }
+
   let data: Buffer;
   try {
     data = await readFile(dbPath);
   } catch (err: unknown) {
     if (isNodeFsError(err) && err.code === "ENOENT") {
-      return;
+      return null;
     }
     throw err;
   }
   if (data.length === 0) {
-    return;
+    return null;
   }
   await prisma.whatsAppSessionBlob.upsert({
     where: { projectId },
@@ -175,6 +208,9 @@ export async function persistWhatsAppSessionToBlob(
   console.info(
     `[whatsapp-store] persisted session projectId=${projectId} bytes=${String(data.length)}`,
   );
+  // Re-stat after read in case mtime moved; prefer post-write fingerprint from pre-read stat
+  // (SQLite rarely changes mid-read for this path).
+  return fileStat;
 }
 
 /**

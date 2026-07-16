@@ -206,6 +206,48 @@ export const REMINDER_TEMPLATE_SLOT_DEFINITIONS: readonly ReminderTemplateSlotDe
     sortOrder: 4,
   },
   {
+    slotKey: "countdown_1h",
+    name: "1-Hour Countdown",
+    reminderFormat: "IMAGE",
+    bodyTemplate: [
+      "🚨🚨 1 hour to LIVE 🚨🚨",
+      "",
+      "If you've been trying to manage diabetes the usual way",
+      "but still feel like you're not seeing the full picture",
+      "",
+      "Tonight will help connect the dots.",
+      "",
+      "We'll be sharing:",
+      "",
+      "why blood sugar is only one part of the story",
+      "",
+      "what may be getting overlooked beneath the surface",
+      "",
+      "why managing the numbers is not the same as truly improving the condition",
+      "",
+      "how to start seeing diabetes from a more complete perspective",
+      "",
+      "Sometimes one new understanding can change the questions you ask",
+      "and that can change the decisions you make after that.",
+      "",
+      "🕒 {{workshopTime}}",
+      "Join us here:",
+      "👉 {{zoomLink}}",
+      "Zoom ID: {{zoomId}}",
+      "Zoom Passcode: {{zoomPasscode}}",
+      "",
+      "We have more registrants than the room can hold,",
+      "so please join a few minutes early to avoid missing out.",
+      "",
+      "See you there!",
+    ].join("\n"),
+    scheduleRuleKind: "EVENT_START_OFFSET",
+    dayOffset: null,
+    clockTimeMyt: null,
+    startOffsetMinutes: -60,
+    sortOrder: 5,
+  },
+  {
     slotKey: "live_now",
     name: "LIVE NOW",
     reminderFormat: "TEXT",
@@ -226,7 +268,7 @@ export const REMINDER_TEMPLATE_SLOT_DEFINITIONS: readonly ReminderTemplateSlotDe
     dayOffset: null,
     clockTimeMyt: null,
     startOffsetMinutes: -2,
-    sortOrder: 5,
+    sortOrder: 6,
   },
   {
     slotKey: "post_live_sticker",
@@ -237,12 +279,12 @@ export const REMINDER_TEMPLATE_SLOT_DEFINITIONS: readonly ReminderTemplateSlotDe
     dayOffset: null,
     clockTimeMyt: null,
     startOffsetMinutes: 18,
-    sortOrder: 6,
+    sortOrder: 7,
   },
 ] as const;
 
 /**
- * Seeds the six SOP reminder template slots for a project.
+ * Seeds Show Up reminder template slots for a project.
  * Preserves uploaded `mediaUrl` / `stickerUrl`; refreshes SOP caption copy + schedule metadata.
  */
 export async function seedReminderTemplatesForProject(

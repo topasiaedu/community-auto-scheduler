@@ -80,6 +80,8 @@ export function SingleMessageSection({ vm }: SingleMessageSectionProps): ReactEl
     copyText,
     setCopyText,
     imagePath,
+    imageUploading,
+    composeImageDisplayUrl,
     clearPostImage,
     pollQuestion,
     setPollQuestion,
@@ -161,10 +163,6 @@ export function SingleMessageSection({ vm }: SingleMessageSectionProps): ReactEl
     }
   }, [canUseApiRoutes, operatorKind, loadTemplates]);
 
-  if (!canUseApiRoutes) {
-    return null;
-  }
-
   const selectedProject = useMemo(
     () => projects.find((p) => p.id === selectedProjectId),
     [projects, selectedProjectId],
@@ -174,6 +172,10 @@ export function SingleMessageSection({ vm }: SingleMessageSectionProps): ReactEl
     const activeCommunityJids = selectedProject?.activeCommunityJids ?? null;
     return resolveValueFanOutDestinationsForProject(groups, activeCommunityJids);
   }, [groups, selectedProject?.activeCommunityJids]);
+
+  if (!canUseApiRoutes) {
+    return null;
+  }
 
   const isValueFanOut = operatorKind === "VALUE";
 
@@ -194,7 +196,6 @@ export function SingleMessageSection({ vm }: SingleMessageSectionProps): ReactEl
   });
 
   const requestSchedule = (): void => {
-    setFormError(null);
     if (!waConnected) {
       setFormError("Connect WhatsApp first (see Link WhatsApp).");
       return;
@@ -210,11 +211,30 @@ export function SingleMessageSection({ vm }: SingleMessageSectionProps): ReactEl
       return;
     }
 
+    if (
+      operatorKind === "VALUE" &&
+      valueFormat === "IMAGE_CAPTION" &&
+      (imagePath === null || imagePath.length === 0)
+    ) {
+      if (imageUploading) {
+        setFormError("Image is still uploading — wait a moment, then try again.");
+        return;
+      }
+      if (composeImageDisplayUrl !== null) {
+        setFormError(
+          "Image upload did not finish. Remove the image and upload again, or check the upload error above.",
+        );
+        return;
+      }
+    }
+
     const bodyResult = buildSingleMessageBody(buildFields());
     if (!bodyResult.ok) {
       setFormError(bodyResult.error);
       return;
     }
+
+    setFormError(null);
 
     const scheduledAt = bodyResult.body.scheduledAt;
     if (typeof scheduledAt !== "string" || !isUtcIsoAtLeastSecondsAhead(scheduledAt, MIN_LEAD_SECONDS)) {
@@ -476,6 +496,7 @@ export function SingleMessageSection({ vm }: SingleMessageSectionProps): ReactEl
                   {valueFormat === "IMAGE_CAPTION" ? (
                     <ImageDropZone
                       imagePath={imagePath}
+                      uploading={imageUploading}
                       onUpload={onUploadImage}
                       onRemove={() => clearPostImage()}
                     />

@@ -12,6 +12,7 @@ export const REMINDER_SLOT_LABELS: Record<string, string> = {
   countdown_2d: "2-Day",
   countdown_1d: "1-Day",
   starting_soon: "Starting Soon",
+  countdown_1h: "1-Hour",
   live_now: "LIVE NOW",
   post_live_sticker: "Sticker",
 };

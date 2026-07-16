@@ -6,12 +6,19 @@ import { useRef, useState, type DragEvent, type ReactElement } from "react";
 
 type ImageDropZoneProps = {
   imagePath: string | null;
+  uploading?: boolean;
   onUpload: (file: File | undefined) => void;
   onRemove: () => void;
   disabled?: boolean;
 };
 
-export function ImageDropZone({ imagePath, onUpload, onRemove, disabled = false }: ImageDropZoneProps): ReactElement {
+export function ImageDropZone({
+  imagePath,
+  uploading = false,
+  onUpload,
+  onRemove,
+  disabled = false,
+}: ImageDropZoneProps): ReactElement {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
 
@@ -26,6 +33,14 @@ export function ImageDropZone({ imagePath, onUpload, onRemove, disabled = false 
       onUpload(file);
     }
   };
+
+  if (uploading) {
+    return (
+      <div className="image-dropzone image-dropzone--disabled" aria-live="polite">
+        <span className="image-dropzone__label">Uploading image…</span>
+      </div>
+    );
+  }
 
   if (imagePath !== null) {
     const filename = imagePath.split("/").pop() ?? imagePath;

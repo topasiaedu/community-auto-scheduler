@@ -70,6 +70,8 @@ export function useNmcasApp() {
   const [copyText, setCopyText] = useState("");
   const [scheduledLocal, setScheduledLocal] = useState(() => defaultScheduleTime());
   const [imagePath, setImagePath] = useState<string | null>(null);
+  /** True while POST /uploads/post-image is in flight. */
+  const [imageUploading, setImageUploading] = useState(false);
   /** Local blob URL for a file the user just picked (before/while uploading). */
   const [imagePreviewObjectUrl, setImagePreviewObjectUrl] = useState<string | null>(null);
   /** Blob URL for `imagePath` loaded from the API (private bucket). */
@@ -106,6 +108,7 @@ export function useNmcasApp() {
   ]);
 
   const clearPostImage = useCallback(() => {
+    setImageUploading(false);
     setImagePreviewObjectUrl((prev) => {
       if (prev !== null) {
         URL.revokeObjectURL(prev);
@@ -584,8 +587,16 @@ export function useNmcasApp() {
     }
   };
 
+  const clearImagePreviewBlob = useCallback(() => {
+    setImagePreviewObjectUrl((prev) => {
+      if (prev !== null) {
+        URL.revokeObjectURL(prev);
+      }
+      return null;
+    });
+  }, []);
+
   const onUploadImage = (file: File | undefined) => {
-    setFormError(null);
     if (file === undefined) {
       return;
     }
@@ -593,32 +604,38 @@ export function useNmcasApp() {
       setFormError("Sign in and pick a project before uploading.");
       return;
     }
-    setImagePreviewObjectUrl((prev) => {
-      if (prev !== null) {
-        URL.revokeObjectURL(prev);
-      }
-      return URL.createObjectURL(file);
-    });
+    setFormError(null);
+    clearImagePreviewBlob();
+    setImagePreviewObjectUrl(URL.createObjectURL(file));
+    setImageUploading(true);
     void (async () => {
-      const fd = new FormData();
-      fd.append("file", file);
-      const res = await authorizedFetch("/uploads/post-image", {
-        method: "POST",
-        body: fd,
-      });
-      if (!res.ok) {
-        const err = (await res.json().catch(() => ({}))) as { error?: string };
-        setFormError(err.error ?? `Upload failed (${String(res.status)})`);
-        return;
-      }
-      const j = (await res.json()) as { path: string };
-      setImagePreviewObjectUrl((prev) => {
-        if (prev !== null) {
-          URL.revokeObjectURL(prev);
+      try {
+        const fd = new FormData();
+        fd.append("file", file);
+        const res = await authorizedFetch("/uploads/post-image", {
+          method: "POST",
+          body: fd,
+        });
+        if (!res.ok) {
+          const err = (await res.json().catch(() => ({}))) as { error?: string };
+          clearImagePreviewBlob();
+          setFormError(err.error ?? `Image upload failed (${String(res.status)}). Try again.`);
+          return;
         }
-        return null;
-      });
-      setImagePath(j.path);
+        const j = (await res.json()) as { path?: string };
+        if (typeof j.path !== "string" || j.path.length === 0) {
+          clearImagePreviewBlob();
+          setFormError("Image upload failed — server did not return a storage path. Try again.");
+          return;
+        }
+        clearImagePreviewBlob();
+        setImagePath(j.path);
+      } catch (e) {
+        clearImagePreviewBlob();
+        setFormError(e instanceof Error ? e.message : "Image upload failed. Try again.");
+      } finally {
+        setImageUploading(false);
+      }
     })();
   };
 
@@ -992,6 +1009,7 @@ export function useNmcasApp() {
     scheduledLocal,
     setScheduledLocal,
     imagePath,
+    imageUploading,
     composeImageDisplayUrl,
     clearPostImage,
     fetchPostImageObjectUrl,

@@ -168,7 +168,7 @@ function fixedValueOccupiedDays(webinarDate: string): string[] {
 }
 
 /**
- * Computes the six Show Up reminder slots with UTC scheduledAt instants.
+ * Computes Show Up reminder slots with UTC scheduledAt instants.
  */
 export function computeShowUpSlots(
   webinarDate: string,
@@ -193,6 +193,10 @@ export function computeShowUpSlots(
     {
       slotKey: "starting_soon",
       scheduledAt: mytDateTimeToUtcIso(date, "11:00"),
+    },
+    {
+      slotKey: "countdown_1h",
+      scheduledAt: eventStartOffsetUtcIso(date, eventStartTimeMyt, -60),
     },
     {
       slotKey: "live_now",

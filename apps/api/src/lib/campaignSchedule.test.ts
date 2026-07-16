@@ -48,6 +48,13 @@ describe("campaignSchedule", () => {
     );
     assert.equal(formatUtcAsMytIso(startingSoon), "2026-06-29T11:00:00");
 
+    const countdown1h = computeReminderSlotTime(
+      { scheduleRuleKind: "EVENT_START_OFFSET", dayOffset: null, clockTimeMyt: null, startOffsetMinutes: -60 },
+      WEBINAR,
+      EVENT_START,
+    );
+    assert.equal(formatUtcAsMytIso(countdown1h), "2026-06-29T19:00:00");
+
     const liveNow = computeReminderSlotTime(
       { scheduleRuleKind: "EVENT_START_OFFSET", dayOffset: null, clockTimeMyt: null, startOffsetMinutes: -2 },
       WEBINAR,

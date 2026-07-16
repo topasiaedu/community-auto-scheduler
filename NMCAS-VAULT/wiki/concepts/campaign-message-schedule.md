@@ -1,8 +1,8 @@
 ---
 title: "Campaign message schedule (SOP slots)"
 type: "concept"
-updated: "2026-07-08"
-sources: 2
+updated: "2026-07-16"
+sources: 3
 tags: ["nmcas", "sop", "product", "scheduling", "campaign"]
 ---
 
@@ -33,6 +33,7 @@ From [[wiki/sources/2026-07-07-whatsapp-community-sop-dr-jasmine-show-up-referen
 | 02 | 2-Day Countdown | −2 days | 3:00 PM | Image + templated caption |
 | 03 | 1-Day Countdown | −1 day | 8:00 PM | Image + templated caption |
 | 04 | Starting Soon | day 0 | 11:00 AM | Image + templated caption |
+| 04b | **1-Hour Countdown** | day 0 | start − 60 min | Image + templated caption — added 2026-07-13 ([[wiki/sources/2026-07-16-do-migration-oom-incident-session]]) |
 | 05 | LIVE NOW | day 0 | start − 2 min | Text only (join link) |
 | 06 | Sticker | day 0 | start + 18 min | Sticker (no caption) |
 
@@ -59,6 +60,7 @@ From [[wiki/sources/2026-07-07-whatsapp-community-sop-dr-jasmine-show-up-referen
 | 2-Day Countdown (−2d 3PM) | webinarDate − 2d @ 15:00 |
 | 1-Day Countdown (−1d 8PM) | webinarDate − 1d @ 20:00 |
 | Starting Soon (day0 11AM) | webinarDate @ 11:00 |
+| **1-Hour Countdown** | eventStart − 60 min |
 | LIVE NOW | eventStart − 2 min |
 | Sticker | eventStart + 18 min |
 | Value Post morning | fixed offsets @ 11:00 |
@@ -69,7 +71,7 @@ Clock times are **baked into** `ReminderTemplate` seed data and `campaignSchedul
 
 Seeded on project create (assets uploaded in Settings):
 
-`welcome`, `countdown_2d`, `countdown_1d`, `starting_soon`, `live_now`, `post_live_sticker`.
+`welcome`, `countdown_2d`, `countdown_1d`, `starting_soon`, **`countdown_1h`**, `live_now`, `post_live_sticker`.
 
 Value Posts are authored fresh per campaign (not templated).
 

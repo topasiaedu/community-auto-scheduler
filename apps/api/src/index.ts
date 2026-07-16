@@ -22,6 +22,7 @@ import { registerUploadRoutes } from "./routes/uploads.js";
 import { registerWaRoutes } from "./routes/wa.js";
 import { SEND_SCHEDULED_MESSAGE_QUEUE } from "./queues.js";
 import { handleSendScheduledMessageJobs } from "./worker/send-scheduled-message.js";
+import { memSampleForJson, sampleMemory, startMemoryLogger } from "./lib/mem-sample.js";
 import { startRescueSweep } from "./rescue-sweep.js";
 import { WaConnectionPool } from "./wa/wa-pool.js";
 import { assertWhatsAppStoreConfig, whatsappStoreExample } from "./wa/whatsapp-store.js";
@@ -108,6 +109,7 @@ async function main(): Promise<void> {
     ok: true as const,
     queue: SEND_SCHEDULED_MESSAGE_QUEUE,
     whatsappStoreExample: whatsappStoreExample(env.DEFAULT_PROJECT_ID),
+    memory: memSampleForJson(sampleMemory(waPool)),
   }));
 
   fastify.get("/ready", async () => {
@@ -137,6 +139,7 @@ async function main(): Promise<void> {
   let shuttingDown = false;
   let keepaliveTimer: ReturnType<typeof setInterval> | undefined;
   let stopRescueSweep: (() => void) | undefined;
+  let stopMemoryLogger: (() => void) | undefined;
 
   const shutdown = async (signal: string) => {
     if (shuttingDown) {
@@ -145,6 +148,7 @@ async function main(): Promise<void> {
     shuttingDown = true;
     clearInterval(keepaliveTimer);
     stopRescueSweep?.();
+    stopMemoryLogger?.();
     fastify.log.info({ signal }, "Shutting down");
     try {
       await fastify.close();
@@ -204,6 +208,8 @@ async function main(): Promise<void> {
   }, 4 * 60 * 1000);
 
   stopRescueSweep = startRescueSweep(prisma, boss);
+  /** Every 60s → Render logs; also exposed live on GET /health → memory. */
+  stopMemoryLogger = startMemoryLogger(waPool, 60_000);
 
   await fastify.listen({ port: env.PORT, host: "0.0.0.0" });
   fastify.log.info({ port: env.PORT }, "API listening");

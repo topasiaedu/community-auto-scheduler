@@ -96,3 +96,9 @@ Append-only timeline of ingests, filed queries, and lint passes. Newest entries 
 - Raw: `raw/sources/2026-07-10-p8a-late-campaign-partial-schedule.md`, `raw/sources/2026-07-10-p8b-value-fan-out-active-communities.md`
 - Wiki: [[index]] only (wiki source pages deferred until post-implementation)
 - Notes: Operator-reported pain — campaign blocked when Welcome past; Value posts require per-community repeat. P8-A: auto-skip past reminder slots + explicit `skipSlotKeys` (Welcome checkbox), no schema. P8-B: `Project.activeCommunityJids`, Settings checkboxes, `POST /messages` Value `fanOut: true`. Each raw file includes copy-paste agent prompt sized for ~200k context. Duplicate community UX explicitly out of scope.
+
+## [2026-07-16] ingest | DO migration after Render OOM incident
+
+- Raw: `raw/sources/2026-07-16-do-migration-oom-incident-session.md`
+- Wiki: [[wiki/sources/2026-07-16-do-migration-oom-incident-session]], [[wiki/overview]], [[wiki/concepts/wa-connection-pool]], [[wiki/concepts/campaign-message-schedule]], [[index]]
+- Notes: Missed Starting Soon (Jul 12–13) from Render 512MB OOM loop; cancelled catch-up jobs; local laptop failover; RAM opts `16b811a`; API migrated to shared DO Droplet (`nmcas-server.nmmedia.app`, PM2 port 3002, nginx, swap); Vercel `VITE_API_URL` updated; Render suspended. Memory spike ~700MB on WA connect (not media). Added `countdown_1h` slot. **Supersedes** 2026-04-21 Render-free adequacy for API. Open: commit countdown_1h/mem-log if not on main; monitor DO over next campaign week.

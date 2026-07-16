@@ -1,8 +1,8 @@
 ---
 title: "WhatsApp connection pool (whatsmeow-node)"
 type: "concept"
-updated: "2026-07-06"
-sources: 6
+updated: "2026-07-16"
+sources: 7
 tags: ["whatsmeow", "whatsapp", "architecture", "nmcas"]
 ---
 
@@ -89,10 +89,25 @@ Baileys' `sendMessage` returns a Promise that resolves only when WhatsApp ACKs. 
 
 Set to `pino({ level: "silent" })` in production (`NODE_ENV === "production"`). Without this, Baileys emits verbose Signal Protocol debug logs (`[rtkcc]`, `Closing session: SessionEntry`) that flood Render logs on every reconnect.
 
-## Free-tier infrastructure notes (confirmed 2026-04-21)
+## Free-tier infrastructure notes
 
-- **Render free tier:** Adequate with UptimeRobot 5-min pings (prevents 15-min spin-down). 512MB RAM; `NODE_OPTIONS=--max-old-space-size=432` in Dockerfile.
-- **Supabase free tier:** Adequate. Connection drops prevented by TCP keepalive params on pg-boss URL and Prisma `SELECT 1` heartbeat every 4 min. Project pausing prevented by UptimeRobot-triggered activity.
+### Render (superseded for API — 2026-07-16)
+
+Prior assessment (2026-04-21): Render free tier adequate with UptimeRobot pings. **Superseded** after whatsmeow-node production OOM on 512 MB — connect spikes to ~700 MB RSS. API moved to DigitalOcean with swap. See [[wiki/sources/2026-07-16-do-migration-oom-incident-session]].
+
+Historical Render settings (Docker): `NODE_OPTIONS=--max-old-space-size=256` after commit `16b811a` (was 432).
+
+### DigitalOcean (current API host)
+
+- **Shared 512 MB Droplet** + **2 GB swap**; PM2 process `nmcas-api` on port **3002**; nginx TLS at `nmcas-server.nmmedia.app`.
+- Steady state ~175–265 MB with one warm WA client; connect/hydrate spike ~700 MB — swap absorbs lag; PM2 restarts on hard failure.
+- **Idle eviction:** `wa-pool.ts` evicts WA after 10 min dashboard idle; max 1 warm client.
+- **Session persist throttle:** 5 min interval; skip unchanged `WhatsAppSessionBlob` (mtime/size fingerprint).
+- **Never run Render + DO API together** — shared pg-boss queue risks duplicate sends.
+
+### Supabase
+
+Free tier adequate. Connection drops prevented by TCP keepalive params on pg-boss URL and Prisma `SELECT 1` heartbeat every 4 min.
 
 ## Risk note
 
@@ -106,6 +121,7 @@ Unofficial WhatsApp clients (Baileys / whatsmeow) can trigger account restrictio
 - Implementation snapshot: `raw/sources/2026-04-18-nmcas-implementation-snapshot.md`
 - Stability hardening: `raw/sources/2026-04-21-stability-hardening-session.md`
 - whatsmeow migration + deploy: `raw/sources/2026-07-06-whatsmeow-deploy-product-ux-session.md`
+- DO migration + OOM incident: `raw/sources/2026-07-16-do-migration-oom-incident-session.md`
 
 ## See also
 
@@ -116,4 +132,5 @@ Unofficial WhatsApp clients (Baileys / whatsmeow) can trigger account restrictio
 - [[wiki/entities/scheduled-message]]
 - [[wiki/sources/2026-04-21-stability-hardening-session]]
 - [[wiki/sources/2026-07-06-whatsmeow-deploy-product-ux-session]]
+- [[wiki/sources/2026-07-16-do-migration-oom-incident-session]]
 - [[wiki/overview]]

@@ -21,6 +21,7 @@ const EXPECTED_SHOW_UP: ReadonlyArray<{ slotKey: string; scheduledAt: string }> 
   { slotKey: "countdown_2d", scheduledAt: "2026-06-27T07:00:00.000Z" },
   { slotKey: "countdown_1d", scheduledAt: "2026-06-28T12:00:00.000Z" },
   { slotKey: "starting_soon", scheduledAt: "2026-06-29T03:00:00.000Z" },
+  { slotKey: "countdown_1h", scheduledAt: "2026-06-29T11:00:00.000Z" },
   { slotKey: "live_now", scheduledAt: "2026-06-29T11:58:00.000Z" },
   { slotKey: "post_live_sticker", scheduledAt: "2026-06-29T12:18:00.000Z" },
 ];
@@ -32,10 +33,10 @@ const EXPECTED_VALUE: ReadonlyArray<{ slotKey: string; scheduledAt: string }> = 
 ];
 
 describe("computeShowUpSlots", () => {
-  it("returns 6 Dr Jasmine slots in SOP order with correct UTC instants", () => {
+  it("returns 7 Dr Jasmine slots in SOP order with correct UTC instants", () => {
     const slots = computeShowUpSlots(WEBINAR_DATE, EVENT_START);
 
-    expect(slots).toHaveLength(6);
+    expect(slots).toHaveLength(7);
     expect(slots.map((s) => s.slotKey)).toEqual(EXPECTED_SHOW_UP.map((s) => s.slotKey));
 
     for (let i = 0; i < EXPECTED_SHOW_UP.length; i += 1) {
@@ -240,8 +241,9 @@ describe("getSchedulableSlotKeys", () => {
     });
     expect(schedulable).toContain("welcome");
     expect(schedulable).toContain("countdown_2d");
+    expect(schedulable).toContain("countdown_1h");
     expect(schedulable).not.toContain("post_live_sticker");
-    expect(schedulable).toHaveLength(5);
+    expect(schedulable).toHaveLength(6);
   });
 });
 

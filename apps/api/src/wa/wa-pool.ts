@@ -59,6 +59,11 @@ export class WaConnectionPool {
     return this.getManager(projectId).isSendReady();
   }
 
+  /** Number of in-memory WaManagers (each may own a Go whatsmeow process). */
+  getWarmClientCount(): number {
+    return this.managers.size;
+  }
+
   async shutdownAll(): Promise<void> {
     clearInterval(this.idleSweepTimer);
     const tasks = [...this.managers.values()].map((m) => m.shutdown());

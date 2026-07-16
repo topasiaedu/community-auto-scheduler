@@ -1,8 +1,8 @@
 ---
 title: "NMCAS vault overview"
 type: "overview"
-updated: "2026-07-08"
-sources: 8
+updated: "2026-07-16"
+sources: 9
 tags: ["nmcas", "meta"]
 ---
 
@@ -36,9 +36,10 @@ See [[wiki/concepts/value-vs-reminder-messages]], [[wiki/sources/2026-07-08-p7-c
 
 | Component | Host |
 |-----------|------|
-| API | Render — `community-auto-scheduler.onrender.com` (Docker) |
+| API | **DigitalOcean** — `https://nmcas-server.nmmedia.app` (PM2, shared 512 MB Droplet + swap; port 3002 behind nginx) — see [[wiki/sources/2026-07-16-do-migration-oom-incident-session]] |
 | Web | Vercel — `community-auto-scheduler-web.vercel.app` |
 | DB / Auth / post images | Supabase |
+| Render API (retired) | `community-auto-scheduler.onrender.com` — **suspended** after DO cutover (2026-07-16) |
 
 ## Core architecture in brief
 
@@ -48,7 +49,7 @@ See [[wiki/concepts/value-vs-reminder-messages]], [[wiki/sources/2026-07-08-p7-c
 | Sessions | Local SQLite + **`WhatsAppSessionBlob`** in Postgres | Survives Render deploys; pooler-friendly `DATABASE_URL` |
 | Post images | Supabase Storage private bucket | Worker downloads at send time |
 | Queue | pg-boss on Supabase Postgres | No Redis; one infra for DB + queue |
-| Hosting | Render (API) + Vercel (FE) + Supabase | Three services, minimal cost |
+| Hosting | DO (API) + Vercel (FE) + Supabase | API moved off Render after OOM incident (2026-07-16); see [[wiki/sources/2026-07-16-do-migration-oom-incident-session]] |
 | Timezone | MYT UTC+8, hardcoded V1 | All communities are Malaysia-based |
 
 ## V1 scope
@@ -84,3 +85,4 @@ See [[wiki/sources/2026-04-13-nmcas-prd-v1]] for full requirements. Out of scope
 - [[wiki/sources/2026-04-21-stability-hardening-session]]
 - [[wiki/sources/2026-07-06-whatsmeow-deploy-product-ux-session]]
 - [[wiki/sources/2026-07-07-whatsapp-community-sop-dr-jasmine-show-up-reference]]
+- [[wiki/sources/2026-07-16-do-migration-oom-incident-session]]

@@ -35,6 +35,7 @@ export function WhatsAppSection({ vm }: WhatsAppSectionProps): ReactElement | nu
     onConfirmResetSession,
     onDismissResetSession,
     waConnected,
+    groupsLoading,
   } = vm;
 
   if (!canUseApiRoutes) {
@@ -153,6 +154,12 @@ export function WhatsAppSection({ vm }: WhatsAppSectionProps): ReactElement | nu
   }
 
   if (waConnected) {
+    const emptyWhileConnected = groups.length === 0;
+    const statusHint = emptyWhileConnected
+      ? groupsLoading
+        ? "— Loading groups…"
+        : "— No groups yet"
+      : `· ${String(groups.length)} group${groups.length === 1 ? "" : "s"} available`;
     return (
       <Card className="border-emerald-200 bg-emerald-50">
         <CardContent className="pt-5">
@@ -160,19 +167,16 @@ export function WhatsAppSection({ vm }: WhatsAppSectionProps): ReactElement | nu
             <div className="flex items-center gap-2.5">
               <span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-500" aria-hidden="true" />
               <span className="font-semibold text-emerald-800">Connected</span>
-              <span className="text-sm text-emerald-700">
-                {groups.length === 0
-                  ? "— load groups to compose sends"
-                  : `· ${String(groups.length)} group${groups.length === 1 ? "" : "s"} available`}
-              </span>
+              <span className="text-sm text-emerald-700">{statusHint}</span>
             </div>
             <Button
               size="sm"
               variant="outline"
               className="border-emerald-300 text-emerald-800 hover:bg-emerald-100"
               onClick={() => void refreshGroups(true)}
+              disabled={emptyWhileConnected && groupsLoading}
             >
-              {groups.length > 0 ? "Reload groups" : "Load groups"}
+              {emptyWhileConnected && groupsLoading ? "Loading groups…" : "Refresh groups"}
             </Button>
           </div>
         </CardContent>

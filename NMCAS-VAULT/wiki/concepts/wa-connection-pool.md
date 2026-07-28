@@ -1,8 +1,8 @@
 ---
 title: "WhatsApp connection pool (whatsmeow-node)"
 type: "concept"
-updated: "2026-07-16"
-sources: 7
+updated: "2026-07-27"
+sources: 8
 tags: ["whatsmeow", "whatsapp", "architecture", "nmcas"]
 ---
 
@@ -39,6 +39,18 @@ Meta's Business API cannot manage WhatsApp communities — it cannot create grou
 The API ships **`WaConnectionPool`** (`apps/api/src/wa/wa-pool.ts`): one **`WaManager(env, projectId)`** per project. HTTP routes under `X-Project-Id` delegate to `pool.getManager(projectId)`; the pg-boss worker calls `pool.start(projectId)` and uses whatsmeow send helpers.
 
 **`start()`** remains **idempotent** — reuse healthy connection, boot when missing; avoid fighting library reconnect backoff.
+
+### Planned: always-on + supervised reconnect (2026-07-27)
+
+As of [[wiki/sources/2026-07-27-wa-reliability-always-on-plan]] (not yet implemented): the browser must stop being the thing that boots WhatsApp. Target behavior:
+
+- Warm default project at API startup; keep session connected for process lifetime (`WA_ALWAYS_ON`, default true).
+- Supervised reconnect with backoff on `disconnected` / Go exit — do not wait for the next HTTP poll.
+- Disable idle eviction when always-on; keep a max-warm safety cap.
+- `GET /wa/status` / `/wa/qr` return in-memory snapshots without awaiting cold boot (avoids Prisma pool starvation).
+- Steady-state cost ~80 MB (Node delta + ~29 MB Go); send/media spikes are separate from idle eviction savings.
+
+Agent briefs: [[wiki/sources/2026-07-27-wa-reliability-agent-prompts]].
 
 ---
 

@@ -24,6 +24,9 @@ import {
   buildReminderSnapshot,
   validateReminderTemplateAssets,
 } from "../lib/reminderMessage.js";
+import {
+  ENGAGEMENT_RECENT_LIST_DEFAULT,
+} from "../lib/waEngagement.js";
 
 const CreatePostMessageSchema = z
   .object({
@@ -644,6 +647,120 @@ export function registerMessageRoutes(
       };
     });
     return { messages };
+  });
+
+  /**
+   * Engagement counts (+ optional recent lists) for a scheduled message.
+   * Foundation read API for Queue reaction/reply badges (Agent 4).
+   */
+  app.get("/messages/:id/engagement", async (req: FastifyRequest, reply: FastifyReply) => {
+    const projectId = req.activeProjectId;
+    if (projectId === undefined || projectId.length === 0) {
+      return reply.code(500).send({ error: "Project scope missing" });
+    }
+    const id =
+      typeof req.params === "object" && req.params !== null && "id" in req.params
+        ? String(req.params.id)
+        : "";
+    if (id.length === 0) {
+      return reply.code(400).send({ error: "Missing id" });
+    }
+
+    const includeRecent =
+      typeof req.query === "object" &&
+      req.query !== null &&
+      "includeRecent" in req.query &&
+      (String(req.query.includeRecent) === "1" ||
+        String(req.query.includeRecent).toLowerCase() === "true");
+
+    const row = await prisma.scheduledMessage.findFirst({
+      where: { id, projectId },
+      select: { id: true },
+    });
+    if (row === null) {
+      return reply.code(404).send({ error: "Message not found" });
+    }
+
+    const [reactionCount, replyCount] = await Promise.all([
+      prisma.messageReaction.count({
+        where: {
+          scheduledMessageId: row.id,
+          emoji: { not: "" },
+        },
+      }),
+      prisma.messageReply.count({
+        where: { scheduledMessageId: row.id },
+      }),
+    ]);
+
+    const payload: {
+      messageId: string;
+      reactionCount: number;
+      replyCount: number;
+      recentReactions?: Array<{
+        id: string;
+        reactorJid: string;
+        emoji: string;
+        reactedAt: string;
+      }>;
+      recentReplies?: Array<{
+        id: string;
+        replyWaMessageId: string;
+        replierJid: string;
+        bodyPreview: string | null;
+        repliedAt: string;
+      }>;
+    } = {
+      messageId: row.id,
+      reactionCount,
+      replyCount,
+    };
+
+    if (includeRecent) {
+      const [reactions, replies] = await Promise.all([
+        prisma.messageReaction.findMany({
+          where: {
+            scheduledMessageId: row.id,
+            emoji: { not: "" },
+          },
+          select: {
+            id: true,
+            reactorJid: true,
+            emoji: true,
+            reactedAt: true,
+          },
+          orderBy: { reactedAt: "desc" },
+          take: ENGAGEMENT_RECENT_LIST_DEFAULT,
+        }),
+        prisma.messageReply.findMany({
+          where: { scheduledMessageId: row.id },
+          select: {
+            id: true,
+            replyWaMessageId: true,
+            replierJid: true,
+            bodyPreview: true,
+            repliedAt: true,
+          },
+          orderBy: { repliedAt: "desc" },
+          take: ENGAGEMENT_RECENT_LIST_DEFAULT,
+        }),
+      ]);
+      payload.recentReactions = reactions.map((r) => ({
+        id: r.id,
+        reactorJid: r.reactorJid,
+        emoji: r.emoji,
+        reactedAt: r.reactedAt.toISOString(),
+      }));
+      payload.recentReplies = replies.map((r) => ({
+        id: r.id,
+        replyWaMessageId: r.replyWaMessageId,
+        replierJid: r.replierJid,
+        bodyPreview: r.bodyPreview,
+        repliedAt: r.repliedAt.toISOString(),
+      }));
+    }
+
+    return payload;
   });
 
   app.post("/messages/:id/cancel", async (req: FastifyRequest, reply: FastifyReply) => {

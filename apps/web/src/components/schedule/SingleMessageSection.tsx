@@ -73,6 +73,7 @@ export function SingleMessageSection({ vm }: SingleMessageSectionProps): ReactEl
     canUseApiRoutes,
     waConnected,
     groups,
+    groupsLoading,
     projects,
     selectedProjectId,
     groupJid,
@@ -370,6 +371,7 @@ export function SingleMessageSection({ vm }: SingleMessageSectionProps): ReactEl
           ) : (
             <CommunityChannelPicker
               groups={groups}
+              groupsLoading={groupsLoading}
               groupJid={groupJid}
               waConnected={waConnected}
               onGroupSelect={onGroupSelect}

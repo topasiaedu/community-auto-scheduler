@@ -213,6 +213,9 @@ async function main(): Promise<void> {
 
   await fastify.listen({ port: env.PORT, host: "0.0.0.0" });
   fastify.log.info({ port: env.PORT }, "API listening");
+  // Agent 1: server-owned always-on WhatsApp warm boot (do not block bind).
+  void waPool.warmDefaultProject();
+  void waPool.warmProjectsWithSessions();
 }
 
 void main().catch((err: unknown) => {

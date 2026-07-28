@@ -1,8 +1,8 @@
 ---
 title: "Entity: ScheduledMessage"
 type: "entity"
-updated: "2026-07-08"
-sources: 3
+updated: "2026-07-27"
+sources: 4
 tags: ["entity", "nmcas", "data-model"]
 ---
 
@@ -72,6 +72,18 @@ DRAFT → PENDING → SENDING → SENT
 ```
 
 See [[wiki/concepts/pg-boss-scheduler]] for rescue sweep and re-queue rules.
+
+### Planned: receipt-gated SENT (2026-07-27)
+
+As of [[wiki/sources/2026-07-27-wa-reliability-always-on-plan]] (not yet implemented):
+
+- Persist WhatsApp `SendResponse.id` as **`waMessageId`** (and optional accept/ack timestamps).
+- **Do not** mark `SENT` on send Promise resolve alone.
+- Flip to `SENT` on whatsmeow **`message:receipt`** matching that id; if no receipt within timeout → honest `FAILED` / uncertain error (not green Sent).
+- Intermediate pre-receipt state may stay `SENDING` or become `ACCEPTED` (implementer choice).
+- Enables a later reactions/replies tracker keyed by `waMessageId` ([[wiki/sources/2026-07-27-wa-reliability-agent-prompts]] Agent 4).
+
+Value fan-out remains **one row per community** — each destination has its own id/receipt.
 
 ## P7 send routing (worker)
 

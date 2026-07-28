@@ -27,6 +27,8 @@ type CommunityChannelPickerProps = {
   groups: readonly WaGroup[];
   groupJid: string;
   waConnected: boolean;
+  /** True while groups are still loading / auto-retrying after connect. */
+  groupsLoading?: boolean;
   onGroupSelect: (jid: string) => void;
   helperText?: string;
   idPrefix?: string;
@@ -36,6 +38,7 @@ export function CommunityChannelPicker({
   groups,
   groupJid,
   waConnected,
+  groupsLoading = false,
   onGroupSelect,
   helperText,
   idPrefix = "schedule",
@@ -128,7 +131,9 @@ export function CommunityChannelPicker({
               {communityOptions.length === 0 ? (
                 <div className="px-3 py-2 text-sm text-muted-foreground">
                   {waConnected
-                    ? "No groups yet — go to WhatsApp and load groups."
+                    ? groupsLoading
+                      ? "Loading groups…"
+                      : "No groups yet — they refresh automatically while WhatsApp is connected."
                     : "Connect WhatsApp first."}
                 </div>
               ) : (

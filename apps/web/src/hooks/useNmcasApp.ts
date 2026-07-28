@@ -55,6 +55,8 @@ export function useNmcasApp() {
   /** Raw WhatsApp multi-device QR payload from `GET /wa/qr` (rendered as SVG in the UI). */
   const [qrPayload, setQrPayload] = useState<string | null>(null);
   const [groups, setGroups] = useState<WaGroup[]>([]);
+  /** True while a groups fetch is in flight (or connected with empty list still auto-retrying). */
+  const [groupsLoading, setGroupsLoading] = useState(false);
   const [messages, setMessages] = useState<ScheduledMessage[]>([]);
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -354,15 +356,21 @@ export function useNmcasApp() {
     (forceRefresh = false) => {
       if (session === null || selectedProjectId.length === 0) {
         setGroups([]);
+        setGroupsLoading(false);
         return;
       }
       const path = forceRefresh ? "/wa/groups?refresh=1" : "/wa/groups";
+      setGroupsLoading(true);
       void authorizedFetch(path)
         .then((r) => r.json() as Promise<{ groups: WaGroup[] }>)
-        .then((j) =>
-          setGroups(dedupeWaGroupsByJid(j.groups.map((row) => normalizeWaGroupRow(row)))),
-        )
-        .catch(() => setGroups([]));
+        .then((j) => {
+          setGroups(dedupeWaGroupsByJid(j.groups.map((row) => normalizeWaGroupRow(row))));
+          setGroupsLoading(false);
+        })
+        .catch(() => {
+          setGroups([]);
+          setGroupsLoading(false);
+        });
     },
     [authorizedFetch, session, selectedProjectId],
   );
@@ -523,6 +531,7 @@ export function useNmcasApp() {
       refreshGroups();
     } else {
       setGroups([]);
+      setGroupsLoading(false);
     }
   }, [waState?.state, refreshGroups]);
 
@@ -533,6 +542,30 @@ export function useNmcasApp() {
       refreshGroups();
     }
   }, [session, selectedProjectId, waState?.state, refreshGroups]);
+
+  /**
+   * While connected with an empty catalog, auto-retry a few times so Schedule destinations
+   * populate without requiring a WhatsApp "Load groups" click (cold cache / race after connect).
+   */
+  useEffect(() => {
+    if (session === null || selectedProjectId.length === 0 || waState?.state !== "connected") {
+      return undefined;
+    }
+    if (groups.length > 0) {
+      return undefined;
+    }
+    let attempts = 0;
+    const maxAttempts = 6;
+    const retryMs = 5_000;
+    const t = window.setInterval(() => {
+      attempts += 1;
+      refreshGroups(true);
+      if (attempts >= maxAttempts) {
+        window.clearInterval(t);
+      }
+    }, retryMs);
+    return () => window.clearInterval(t);
+  }, [session, selectedProjectId, waState?.state, groups.length, refreshGroups]);
 
   useEffect(() => {
     refreshMessages();
@@ -988,6 +1021,7 @@ export function useNmcasApp() {
     waState,
     qrPayload,
     groups,
+    groupsLoading,
     messages,
     formError,
     submitting,

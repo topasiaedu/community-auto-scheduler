@@ -59,6 +59,17 @@ export type ScheduledMessage = {
   sentAt: string | null;
   error: string | null;
   createdByUserId?: string | null;
+  /** WhatsApp stanza id after IPC accept (receipt-gated SENT / future engagement). */
+  waMessageId?: string | null;
+  waAcceptedAt?: string | null;
+  waAckedAt?: string | null;
+};
+
+/** Counts from `GET /messages/:id/engagement` (Agent 4 foundation). */
+export type MessageEngagementCounts = {
+  messageId: string;
+  reactionCount: number;
+  replyCount: number;
 };
 
 export type OperatorKind = "VALUE" | "REMINDER";

@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 import { utcIsoToDatetimeLocalMyt } from "../myt.js";
 import { MessagePreview } from "./MessagePreview.js";
 import { QueueMessagePreview } from "./QueueMessagePreview.js";
+import { QueueEngagementBadge } from "./QueueEngagementBadge.js";
 import { kindBadgeLabel, subBadgeLabel } from "../lib/queueLabels.js";
 import {
   formatAttributedBy,
@@ -89,6 +90,7 @@ export function QueueCard({ message: m, vm }: QueueCardProps): ReactElement {
     onContinueDraft,
     session,
     fetchMediaObjectUrl,
+    authorizedFetch,
   } = vm;
 
   const previewMediaPath =
@@ -191,6 +193,12 @@ export function QueueCard({ message: m, vm }: QueueCardProps): ReactElement {
           <span className="font-medium text-foreground/80">{formatRelativeTime(m.scheduledAt)}</span>
           {attribution.length > 0 ? <span>· {attribution}</span> : null}
         </div>
+
+        <QueueEngagementBadge
+          messageId={m.id}
+          status={m.status}
+          authorizedFetch={authorizedFetch}
+        />
 
         <QueueMessagePreview message={m} fetchMediaUrl={fetchMediaObjectUrl} />
 

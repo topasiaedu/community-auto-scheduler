@@ -548,6 +548,7 @@ export function CampaignWizard({ vm }: CampaignWizardProps): ReactElement {
           </p>
           <CommunityChannelPicker
             groups={vm.groups}
+            groupsLoading={vm.groupsLoading}
             groupJid={reminderGroupJid}
             waConnected={vm.waConnected}
             onGroupSelect={onReminderGroupSelect}

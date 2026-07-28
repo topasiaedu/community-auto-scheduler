@@ -21,14 +21,14 @@ export function registerWaRoutes(app: FastifyInstance, waPool: WaConnectionPool)
       return;
     }
     const wa = waPool.getManager(projectId);
-    await wa.start();
-    const hasQr = wa.getLatestQr() !== undefined;
-    // While a QR is active, report "connecting" so the UI shows the scanner (not a false green Connected).
-    const state = hasQr ? "connecting" : wa.getUiState();
-    return {
-      state,
-      hasQr,
-    };
+    const snap = wa.getStatusSnapshot();
+    // Keep this endpoint cheap: never await a cold boot/persist on the request path.
+    // If we're truly idle, start in the background and return the updated snapshot.
+    if (snap.state === "disconnected" && snap.hasQr === false) {
+      void wa.start();
+      return wa.getStatusSnapshot();
+    }
+    return snap;
   });
 
   app.get("/wa/qr", async (req: FastifyRequest, reply: FastifyReply) => {
@@ -37,9 +37,12 @@ export function registerWaRoutes(app: FastifyInstance, waPool: WaConnectionPool)
       return;
     }
     const wa = waPool.getManager(projectId);
-    await wa.start();
     const qr = wa.getLatestQr();
     if (qr === undefined) {
+      // Start only if we're idle; do not block this request on cold boot.
+      if (wa.getUiState() === "disconnected") {
+        void wa.start();
+      }
       return reply.code(204).send();
     }
     return { qr };

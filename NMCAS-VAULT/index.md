@@ -22,6 +22,10 @@ Catalog of all wiki pages. Updated after every ingest, filed query, or lint pass
 - [[wiki/sources/2026-07-07-whatsapp-community-sop-dr-jasmine-show-up-reference]] — Saved SOP assets; six message slots with exact triggers; corrects welcome + timing paraphrase.
 - [[wiki/sources/2026-07-08-p7-campaign-scheduler-ship-session]] — P7 shipped to main (`8f7d1c1`); 4-step Show Up wizard; SOP captions; optional sticker; live E2E pending.
 - [[wiki/sources/2026-07-16-do-migration-oom-incident-session]] — Render OOM missed sends; local failover; DO API migration (`nmcas-server.nmmedia.app`); memory findings; `countdown_1h` slot.
+- [[wiki/sources/2026-07-18-media-egress-cache-compress-plan]] — Design: Storage egress failure; upload compress + process-local download cache (not yet implemented).
+- [[wiki/sources/2026-07-18-media-egress-agent-prompts]] — Agent 1 compress / Agent 2 cache copy-paste prompts (~200k context).
+- [[wiki/sources/2026-07-27-wa-reliability-always-on-plan]] — Design: always-on WA, receipt-gated SENT, periodic groups; engagement tracker deferred.
+- [[wiki/sources/2026-07-27-wa-reliability-agent-prompts]] — Agents 1–3 reliability prompts + deferred Agent 4 engagement (~200k context).
 - `raw/sources/2026-07-10-p8a-late-campaign-partial-schedule.md` — P8-A agent brief: skip past / explicit Welcome skip for Show Up campaigns.
 - `raw/sources/2026-07-10-p8b-value-fan-out-active-communities.md` — P8-B agent brief: Value fan-out from Single message + active communities in Settings.
 
@@ -33,7 +37,7 @@ Catalog of all wiki pages. Updated after every ingest, filed query, or lint pass
 - [[wiki/concepts/compounding-knowledge-base]] — LLM Wiki as persistent compiled layer; ingest / query / lint.
 - [[wiki/concepts/value-vs-reminder-messages]] — Operator model: Value post (fresh copy, poll nested) vs Reminder (SOP assets, stickers, countdowns).
 - [[wiki/concepts/multi-project-architecture]] — Project as top-level entity; how resources are scoped per project.
-- [[wiki/concepts/wa-connection-pool]] — whatsmeow-node pool; SQLite + WhatsAppSessionBlob; timeout/reconnect; DO hosting + memory notes (Render superseded).
+- [[wiki/concepts/wa-connection-pool]] — whatsmeow-node pool; SQLite + WhatsAppSessionBlob; planned always-on + supervised reconnect (2026-07-27); DO memory notes.
 - [[wiki/concepts/pg-boss-scheduler]] — pg-boss Postgres-backed job queue; rescue sweep; requeue route; race protection table.
 
 ---
@@ -41,7 +45,7 @@ Catalog of all wiki pages. Updated after every ingest, filed query, or lint pass
 ## Entities
 
 - [[wiki/entities/project]] — Project data model: owns sessions, messages, notify recipients, and WA connection.
-- [[wiki/entities/scheduled-message]] — ScheduledMessage data model: POST and POLL types (legacy); planned Value/Reminder; full status lifecycle.
+- [[wiki/entities/scheduled-message]] — ScheduledMessage data model: Value/Reminder; planned `waMessageId` + receipt-gated SENT (2026-07-27).
 
 ---
 
@@ -53,4 +57,4 @@ Catalog of all wiki pages. Updated after every ingest, filed query, or lint pass
 
 ---
 
-*Last indexed: 2026-07-16 — DO migration + OOM incident session ingested.*
+*Last indexed: 2026-07-27 — WA reliability always-on plan and agent prompts.*

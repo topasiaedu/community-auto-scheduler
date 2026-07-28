@@ -9,6 +9,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { ApiEnv } from "../env.js";
 import { isAnimatedWebP } from "../lib/animatedWebp.js";
+import { compressPostImage } from "../lib/compressPostImage.js";
 
 const MAX_BYTES = 16 * 1024 * 1024;
 
@@ -19,6 +20,29 @@ const ALLOWED_PREFIXES = ["posts/", "reminders/", "stickers/"] as const;
 function sanitizeFilename(name: string): string {
   const base = name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 200);
   return base.length > 0 ? base : "image.bin";
+}
+
+/**
+ * Replaces or appends a file extension so the Storage object path matches `mimetype`
+ * (keeps path-based guesses accurate after JPEG compress).
+ */
+function filenameForMimetype(filename: string, mimetype: string): string {
+  const lower = mimetype.toLowerCase();
+  let ext = ".bin";
+  if (lower === "image/jpeg" || lower === "image/jpg") {
+    ext = ".jpg";
+  } else if (lower === "image/png") {
+    ext = ".png";
+  } else if (lower === "image/webp") {
+    ext = ".webp";
+  } else if (lower === "image/gif") {
+    ext = ".gif";
+  }
+  const lastDot = filename.lastIndexOf(".");
+  if (lastDot <= 0) {
+    return `${filename}${ext}`;
+  }
+  return `${filename.slice(0, lastDot)}${ext}`;
 }
 
 function prefixForKind(kind: z.infer<typeof UploadKindSchema>): string {
@@ -116,8 +140,24 @@ export async function registerUploadRoutes(app: FastifyInstance, env: ApiEnv): P
       }
     }
 
+    let uploadBuffer = buffer;
+    let uploadContentType = data.mimetype || "application/octet-stream";
+    let safeName = sanitizeFilename(data.filename);
+
+    // Compress posts/reminders only — stickers stay static WebP as uploaded.
+    if (kind === "post" || kind === "reminder-image") {
+      try {
+        const compressed = await compressPostImage(buffer);
+        uploadBuffer = compressed.buffer;
+        uploadContentType = compressed.mimetype;
+        safeName = filenameForMimetype(safeName, compressed.mimetype);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Image compression failed";
+        return reply.code(400).send({ error: message });
+      }
+    }
+
     const uploadId = randomUUID();
-    const safeName = sanitizeFilename(data.filename);
     const objectPath = `${prefixForKind(kind)}/${projectId}/${uploadId}/${safeName}`;
 
     const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
@@ -126,9 +166,9 @@ export async function registerUploadRoutes(app: FastifyInstance, env: ApiEnv): P
 
     const { error } = await supabase.storage
       .from(env.NMCAS_POST_MEDIA_BUCKET)
-      .upload(objectPath, buffer, {
+      .upload(objectPath, uploadBuffer, {
         upsert: true,
-        contentType: data.mimetype || "application/octet-stream",
+        contentType: uploadContentType,
       });
     if (error !== null) {
       return reply.code(500).send({ error: error.message });

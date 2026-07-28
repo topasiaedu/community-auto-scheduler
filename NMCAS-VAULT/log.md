@@ -102,3 +102,15 @@ Append-only timeline of ingests, filed queries, and lint passes. Newest entries 
 - Raw: `raw/sources/2026-07-16-do-migration-oom-incident-session.md`
 - Wiki: [[wiki/sources/2026-07-16-do-migration-oom-incident-session]], [[wiki/overview]], [[wiki/concepts/wa-connection-pool]], [[wiki/concepts/campaign-message-schedule]], [[index]]
 - Notes: Missed Starting Soon (Jul 12–13) from Render 512MB OOM loop; cancelled catch-up jobs; local laptop failover; RAM opts `16b811a`; API migrated to shared DO Droplet (`nmcas-server.nmmedia.app`, PM2 port 3002, nginx, swap); Vercel `VITE_API_URL` updated; Render suspended. Memory spike ~700MB on WA connect (not media). Added `countdown_1h` slot. **Supersedes** 2026-04-21 Render-free adequacy for API. Open: commit countdown_1h/mem-log if not on main; monitor DO over next campaign week.
+
+## [2026-07-18] ingest | Media egress cache + compress plan and agent prompts
+
+- Raw: `raw/sources/2026-07-18-media-egress-cache-compress-plan.md`, `raw/sources/2026-07-18-media-egress-agent-prompts.md`
+- Wiki: [[wiki/sources/2026-07-18-media-egress-cache-compress-plan]], [[wiki/sources/2026-07-18-media-egress-agent-prompts]], [[index]]
+- Notes: Workshop 5.0 scheduled send failed on Supabase `exceed_egress_quota` (fan-out re-downloads same image). Plan: JPEG compress on upload + process-local download cache with coalesce and RAM caps. Two sequential agent prompts (compress then cache) sized for ~200k context. Ops still must lift Storage restriction for current sends.
+
+## [2026-07-27] ingest | WA reliability always-on plan and agent prompts
+
+- Raw: `raw/sources/2026-07-27-wa-reliability-always-on-plan.md`, `raw/sources/2026-07-27-wa-reliability-agent-prompts.md`
+- Wiki: [[wiki/sources/2026-07-27-wa-reliability-always-on-plan]], [[wiki/sources/2026-07-27-wa-reliability-agent-prompts]], [[wiki/concepts/wa-connection-pool]], [[wiki/entities/scheduled-message]], [[index]]
+- Notes: Root causes — browser-triggered WA boot + idle eviction; SENT = IPC OK not receipt; groups RAM-only; fan-out stays per-row. Locked: always-on + supervised reconnect; receipt-gated SENT via `waMessageId`; periodic group refresh; engagement tracker deferred (Agent 4). Three sequential implement prompts (~200k) + deferred fourth. UI polish explicitly non-goal for this pass.

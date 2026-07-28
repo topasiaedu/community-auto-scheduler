@@ -150,9 +150,57 @@ model ScheduledMessage {
   pgBossJobId        String?
   /// Supabase Auth `user.id` of who created the schedule.
   createdByUserId    String?
+  /// WhatsApp stanza id from SendResponse after IPC accept (Agent 2 / engagement tracker).
+  waMessageId        String?
+  /// When the send IPC returned an id (still SENDING until server receipt).
+  waAcceptedAt       DateTime?
+  /// When message:receipt matched waMessageId (status becomes SENT).
+  waAckedAt          DateTime?
+  reactions          MessageReaction[]
+  replies            MessageReply[]
 
   @@index([projectId, scheduledAt])
   @@index([campaignId])
+  @@index([waMessageId])
+}
+
+/// One emoji reaction per reactor on a tracked NMCAS outbound message (Agent 4).
+/// Empty `emoji` means the reactor removed their reaction (row kept for upsert history).
+model MessageReaction {
+  id                 String           @id @default(cuid())
+  scheduledMessageId String
+  scheduledMessage   ScheduledMessage @relation(fields: [scheduledMessageId], references: [id], onDelete: Cascade)
+  /// WhatsApp JID of the member who reacted.
+  reactorJid         String
+  /// Emoji text; empty string = reaction removed.
+  emoji              String
+  /// Stanza id of the reaction message itself (when known).
+  waReactionId       String?
+  reactedAt          DateTime
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  @@unique([scheduledMessageId, reactorJid])
+  @@index([scheduledMessageId])
+}
+
+/// A quoted reply that targets a tracked NMCAS announcement message (Agent 4).
+/// Scope: quotes on the announcement stanza only (not free-form discussion chatter).
+model MessageReply {
+  id                 String           @id @default(cuid())
+  scheduledMessageId String
+  scheduledMessage   ScheduledMessage @relation(fields: [scheduledMessageId], references: [id], onDelete: Cascade)
+  /// WhatsApp stanza id of the reply message (unique per parent for upsert).
+  replyWaMessageId   String
+  /// WhatsApp JID of the member who replied.
+  replierJid         String
+  /// Truncated body preview for operators (not full analytics).
+  bodyPreview        String?
+  repliedAt          DateTime
+  createdAt          DateTime         @default(now())
+
+  @@unique([scheduledMessageId, replyWaMessageId])
+  @@index([scheduledMessageId])
 }
 
 /// Per-user UI preferences for a project (e.g. last selected WhatsApp group).

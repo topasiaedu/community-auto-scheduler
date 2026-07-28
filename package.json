@@ -20,7 +20,8 @@
     "db:baseline": "node ./scripts/baseline-migrations.mjs",
     "db:deploy": "node ./scripts/migrate-deploy.mjs",
     "db:seed": "node ./scripts/seed.mjs",
-    "start": "node ./scripts/migrate-deploy.mjs && node ./apps/api/dist/index.js"
+    "start": "node ./scripts/migrate-deploy.mjs && node ./apps/api/dist/index.js",
+    "update-server": "bash ./scripts/update-server.sh"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",

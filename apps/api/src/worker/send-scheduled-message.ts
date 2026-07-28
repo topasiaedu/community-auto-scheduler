@@ -1,13 +1,32 @@
 /**
  * pg-boss worker: send one ScheduledMessage via whatsmeow-node and update status.
  * Routes by P7 `operatorKind` + format; falls back to legacy `type` POST/POLL when `operatorKind` is null.
+ *
+ * Status / timeout model (Agent 2):
+ * - IPC success → store `waMessageId`, keep `SENDING` (not SENT yet).
+ * - `message:receipt` (WaManager) → `SENT`.
+ * - Receipt timeout (default 90s after accept) → `FAILED` with no-receipt error.
+ * - IPC hang timeout (120s) is separate: Promise never returns → `FAILED`
+ *   "may already have been delivered" (never double-marks if receipt timeout already ran).
  */
 
 import { createClient } from "@supabase/supabase-js";
 import type { PrismaClient, ScheduledMessage } from "@nmcas/db";
+import type { SendResponse } from "@whatsmeow-node/whatsmeow-node";
 import type { WaManager } from "../wa/wa-manager.js";
 import type { ApiEnv } from "../env.js";
 import type { WaConnectionPool } from "../wa/wa-pool.js";
+import { compressPostImage, sniffImageMimetype } from "../lib/compressPostImage.js";
+import {
+  mediaDownloadCache,
+  type MediaDownloadPayload,
+} from "../lib/mediaDownloadCache.js";
+import { isTransientWaDisconnectError } from "../lib/transientWaError.js";
+import {
+  DEFAULT_WA_RECEIPT_TIMEOUT_MS,
+  buildNoReceiptErrorMessage,
+  noReceiptTimeoutUpdateWhere,
+} from "../lib/waReceipt.js";
 import { parseSendScheduledMessageJobData, type SendScheduledMessageJobData } from "../types/send-scheduled-message.js";
 
 const MAX_ERROR_LEN = 2000;
@@ -69,22 +88,20 @@ function formatScheduledAtMyt(d: Date): string {
   });
 }
 
-function guessImageMimetype(objectPath: string): string {
-  const lower = objectPath.toLowerCase();
-  if (lower.endsWith(".png")) {
-    return "image/png";
-  }
-  if (lower.endsWith(".webp")) {
-    return "image/webp";
-  }
-  if (lower.endsWith(".gif")) {
-    return "image/gif";
-  }
-  return "image/jpeg";
-}
-
 function isAllowedMediaPath(objectPath: string, projectId: string): boolean {
   return MEDIA_PREFIXES.some((prefix) => objectPath.startsWith(`${prefix}/${projectId}/`));
+}
+
+/**
+ * True when the object should be JPEG-compressed on cache miss (posts / reminders).
+ * Stickers stay raw WebP — do not run {@link compressPostImage}.
+ */
+function shouldCompressOnDownload(objectPath: string): boolean {
+  return objectPath.startsWith("posts/") || objectPath.startsWith("reminders/");
+}
+
+function isStickerPath(objectPath: string): boolean {
+  return objectPath.startsWith("stickers/");
 }
 
 /**
@@ -138,61 +155,172 @@ async function markFailedWithNotify(
   await sendFailureWhatsAppAlert(env, waPool, row, message);
 }
 
-async function markSent(prisma: PrismaClient, rowId: string): Promise<void> {
+/**
+ * After IPC accept: persist WhatsApp stanza id and keep status `SENDING` until receipt.
+ */
+async function markAccepted(
+  prisma: PrismaClient,
+  rowId: string,
+  waMessageId: string,
+): Promise<boolean> {
   const result = await prisma.scheduledMessage.updateMany({
     where: { id: rowId, status: "SENDING" },
     data: {
-      status: "SENT",
-      sentAt: new Date(),
-      error: null,
+      waMessageId,
+      waAcceptedAt: new Date(),
     },
   });
   if (result.count === 0) {
-    console.warn(`[send-worker] skip SENT update (row no longer SENDING) id=${rowId}`);
+    console.warn(`[send-worker] skip accept update (row no longer SENDING) id=${rowId}`);
+    return false;
   }
+  return true;
 }
 
 /**
- * Downloads media bytes from the private bucket (`posts/`, `reminders/`, `stickers/`).
+ * Schedules a one-shot timer: if still SENDING with this `waMessageId` after timeout → FAILED.
+ * Idempotent with the receipt listener (updateMany only matches SENDING).
  */
-async function downloadMediaAsset(env: ApiEnv, objectPath: string, projectId: string): Promise<Buffer> {
+function scheduleNoReceiptTimeout(
+  prisma: PrismaClient,
+  env: ApiEnv,
+  waPool: WaConnectionPool,
+  row: ScheduledMessage,
+  waMessageId: string,
+): void {
+  const timeoutMs =
+    env.WA_RECEIPT_TIMEOUT_MS > 0 ? env.WA_RECEIPT_TIMEOUT_MS : DEFAULT_WA_RECEIPT_TIMEOUT_MS;
+  const timer = globalThis.setTimeout(() => {
+    void (async () => {
+      const error = buildNoReceiptErrorMessage(waMessageId);
+      const result = await prisma.scheduledMessage.updateMany({
+        where: noReceiptTimeoutUpdateWhere(row.id, waMessageId),
+        data: {
+          status: "FAILED",
+          error: truncateError(error),
+        },
+      });
+      if (result.count === 0) {
+        return;
+      }
+      console.warn(
+        `[send-worker] no receipt within ${String(timeoutMs)}ms → FAILED id=${row.id} waMessageId=${waMessageId}`,
+      );
+      await sendFailureWhatsAppAlert(env, waPool, row, error);
+    })().catch((err: unknown) => {
+      console.error(`[send-worker] receipt timeout handler failed id=${row.id}:`, err);
+    });
+  }, timeoutMs);
+  timer.unref?.();
+}
+
+/**
+ * Downloads (or reuses cached) media from the private bucket.
+ * On miss: Supabase download → compress posts/reminders → cache → return `{ buffer, mimetype }`.
+ * Stickers are cached as-is (no JPEG compress). Prefer returned mimetype over path extension.
+ */
+async function downloadMediaAsset(
+  env: ApiEnv,
+  objectPath: string,
+  projectId: string,
+): Promise<MediaDownloadPayload> {
   if (!isAllowedMediaPath(objectPath, projectId)) {
     throw new Error(`Invalid media path for project: ${objectPath}`);
   }
-  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
-    auth: { persistSession: false, autoRefreshToken: false },
+
+  return mediaDownloadCache.getOrLoad(objectPath, async () => {
+    const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const { data, error } = await supabase.storage
+      .from(env.NMCAS_POST_MEDIA_BUCKET)
+      .download(objectPath);
+    if (error !== null || data === null) {
+      throw new Error(`Storage download failed: ${error?.message ?? "no data"}`);
+    }
+    const raw = Buffer.from(await data.arrayBuffer());
+
+    if (isStickerPath(objectPath)) {
+      const sniffed = sniffImageMimetype(raw);
+      const mimetype = sniffed === "image/webp" ? sniffed : "image/webp";
+      return { buffer: raw, mimetype };
+    }
+
+    if (shouldCompressOnDownload(objectPath)) {
+      const compressed = await compressPostImage(raw);
+      return { buffer: compressed.buffer, mimetype: compressed.mimetype };
+    }
+
+    return { buffer: raw, mimetype: sniffImageMimetype(raw) };
   });
-  const { data, error } = await supabase.storage
-    .from(env.NMCAS_POST_MEDIA_BUCKET)
-    .download(objectPath);
-  if (error !== null || data === null) {
-    throw new Error(`Storage download failed: ${error?.message ?? "no data"}`);
-  }
-  return Buffer.from(await data.arrayBuffer());
 }
 
+/**
+ * Runs a WhatsApp send under the IPC hang timeout.
+ * @returns `SendResponse` on success, or `null` when the row was already marked FAILED / reset.
+ */
 async function runSendWithTimeout(
   prisma: PrismaClient,
   env: ApiEnv,
   waPool: WaConnectionPool,
   row: ScheduledMessage,
   label: string,
-  sendFn: () => Promise<void>,
-): Promise<boolean> {
+  sendFn: () => Promise<SendResponse>,
+): Promise<SendResponse | null> {
   try {
-    await withTimeout(sendFn(), SEND_TO_WHATSAPP_TIMEOUT_MS, label);
-    return true;
+    return await withTimeout(sendFn(), SEND_TO_WHATSAPP_TIMEOUT_MS, label);
   } catch (err) {
     if (err instanceof WaSendTimeoutError) {
       const timeoutMsg = `WhatsApp send timed out after ${String(SEND_TO_WHATSAPP_TIMEOUT_MS / 1000)}s — the message may already have been delivered. Check the group and use Re-queue if it was not sent.`;
       console.warn(`[send-worker] ${label} timed out — marking FAILED (may have sent) id=${row.id}`);
       await markFailedWithNotify(prisma, env, waPool, row, timeoutMsg);
-      return false;
+      return null;
     }
     const message = err instanceof Error ? err.message : "send failed";
+    if (isTransientWaDisconnectError(message)) {
+      console.warn(
+        `[send-worker] ${label} transient WA disconnect — resetting to PENDING for retry id=${row.id}: ${message}`,
+      );
+      await prisma.scheduledMessage.updateMany({
+        where: { id: row.id, status: { in: ["PENDING", "SENDING"] } },
+        data: { status: "PENDING", error: null },
+      });
+      return null;
+    }
     await markFailedWithNotify(prisma, env, waPool, row, message);
-    return false;
+    return null;
   }
+}
+
+/**
+ * Persists accept + schedules receipt timeout. Does **not** mark SENT (receipt listener does).
+ */
+async function afterIpcAccept(
+  prisma: PrismaClient,
+  env: ApiEnv,
+  waPool: WaConnectionPool,
+  row: ScheduledMessage,
+  response: SendResponse,
+): Promise<void> {
+  const waMessageId = typeof response.id === "string" ? response.id.trim() : "";
+  if (waMessageId.length === 0) {
+    await markFailedWithNotify(
+      prisma,
+      env,
+      waPool,
+      row,
+      "WhatsApp send returned an empty message id — cannot wait for server receipt",
+    );
+    return;
+  }
+  const accepted = await markAccepted(prisma, row.id, waMessageId);
+  if (!accepted) {
+    return;
+  }
+  console.info(
+    `[send-worker] IPC accepted — awaiting receipt id=${row.id} waMessageId=${waMessageId}`,
+  );
+  scheduleNoReceiptTimeout(prisma, env, waPool, row, waMessageId);
 }
 
 async function sendPollRow(
@@ -209,11 +337,11 @@ async function sendPollRow(
     return;
   }
   const selectableCount = row.pollMultiSelect ? values.length : 1;
-  const ok = await runSendWithTimeout(prisma, env, waPool, row, "WhatsApp poll send", () =>
+  const response = await runSendWithTimeout(prisma, env, waPool, row, "WhatsApp poll send", () =>
     wa.sendPoll(row.groupJid, question, values, selectableCount),
   );
-  if (ok) {
-    await markSent(prisma, row.id);
+  if (response !== null) {
+    await afterIpcAccept(prisma, env, waPool, row, response);
   }
 }
 
@@ -233,8 +361,9 @@ async function sendPostRow(
 
   if (imageUrl !== null && imageUrl.length > 0) {
     try {
-      imageBuffer = await downloadMediaAsset(env, imageUrl, row.projectId);
-      imageMimetype = guessImageMimetype(imageUrl);
+      const media = await downloadMediaAsset(env, imageUrl, row.projectId);
+      imageBuffer = media.buffer;
+      imageMimetype = media.mimetype;
     } catch (err) {
       const message = err instanceof Error ? err.message : "Image download failed";
       await markFailedWithNotify(prisma, env, waPool, row, message);
@@ -251,11 +380,11 @@ async function sendPostRow(
     return;
   }
 
-  const ok = await runSendWithTimeout(prisma, env, waPool, row, "WhatsApp post send", () =>
+  const response = await runSendWithTimeout(prisma, env, waPool, row, "WhatsApp post send", () =>
     wa.sendPost(row.groupJid, trimmedText, imageBuffer, imageMimetype),
   );
-  if (ok) {
-    await markSent(prisma, row.id);
+  if (response !== null) {
+    await afterIpcAccept(prisma, env, waPool, row, response);
   }
 }
 
@@ -273,11 +402,11 @@ async function sendTextRow(
     await markFailedWithNotify(prisma, env, waPool, row, emptyMessage);
     return;
   }
-  const ok = await runSendWithTimeout(prisma, env, waPool, row, "WhatsApp text send", () =>
+  const response = await runSendWithTimeout(prisma, env, waPool, row, "WhatsApp text send", () =>
     wa.sendPost(row.groupJid, trimmedText, undefined, "image/jpeg"),
   );
-  if (ok) {
-    await markSent(prisma, row.id);
+  if (response !== null) {
+    await afterIpcAccept(prisma, env, waPool, row, response);
   }
 }
 
@@ -291,18 +420,19 @@ async function sendStickerRow(
 ): Promise<void> {
   let stickerBuffer: Buffer;
   try {
-    stickerBuffer = await downloadMediaAsset(env, stickerUrl, row.projectId);
+    const media = await downloadMediaAsset(env, stickerUrl, row.projectId);
+    stickerBuffer = media.buffer;
   } catch (err) {
     const message = err instanceof Error ? err.message : "Sticker download failed";
     await markFailedWithNotify(prisma, env, waPool, row, message);
     return;
   }
 
-  const ok = await runSendWithTimeout(prisma, env, waPool, row, "WhatsApp sticker send", () =>
+  const response = await runSendWithTimeout(prisma, env, waPool, row, "WhatsApp sticker send", () =>
     wa.sendSticker(row.groupJid, stickerBuffer),
   );
-  if (ok) {
-    await markSent(prisma, row.id);
+  if (response !== null) {
+    await afterIpcAccept(prisma, env, waPool, row, response);
   }
 }
 
@@ -455,6 +585,15 @@ async function processOneJob(
     return;
   }
   if (row.status !== "PENDING" && row.status !== "SENDING") {
+    return;
+  }
+
+  // Already IPC-accepted and waiting for message:receipt / receipt timeout — do not re-send.
+  const existingWaId = row.waMessageId?.trim() ?? "";
+  if (row.status === "SENDING" && existingWaId.length > 0) {
+    console.warn(
+      `[send-worker] skip re-send; awaiting receipt id=${row.id} waMessageId=${existingWaId}`,
+    );
     return;
   }
 

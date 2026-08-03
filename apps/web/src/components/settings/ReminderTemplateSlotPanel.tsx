@@ -54,18 +54,25 @@ export function ReminderTemplateSlotPanel({
   const assetPath =
     template.reminderFormat === "STICKER" ? stickerUrl : mediaUrl;
 
+  /** Full reset when switching to a different slot. */
   useEffect(() => {
     setBodyTemplate(template.bodyTemplate ?? "");
     setMediaUrl(template.mediaUrl);
     setStickerUrl(template.stickerUrl);
     setDirty(false);
     setError(null);
-  }, [
-    template.slotKey,
-    template.bodyTemplate,
-    template.mediaUrl,
-    template.stickerUrl,
-  ]);
+  }, [template.slotKey]);
+
+  /** Sync server updates only when the operator is not mid-edit. */
+  useEffect(() => {
+    if (dirty) {
+      return;
+    }
+    setBodyTemplate(template.bodyTemplate ?? "");
+    setMediaUrl(template.mediaUrl);
+    setStickerUrl(template.stickerUrl);
+    setError(null);
+  }, [dirty, template.bodyTemplate, template.mediaUrl, template.stickerUrl]);
 
   useEffect(() => {
     if (assetPath === null || assetPath.length === 0) {

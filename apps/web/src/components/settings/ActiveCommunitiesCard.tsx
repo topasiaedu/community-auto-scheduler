@@ -69,10 +69,18 @@ export function ActiveCommunitiesCard({
   const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
+    if (dirty) {
+      return;
+    }
+    setSelectedJids(initialSelectedJids(project?.activeCommunityJids, communityOptions));
+    setError(null);
+  }, [dirty, project?.id, project?.activeCommunityJids, communityOptions]);
+
+  useEffect(() => {
     setSelectedJids(initialSelectedJids(project?.activeCommunityJids, communityOptions));
     setDirty(false);
     setError(null);
-  }, [project?.id, project?.activeCommunityJids, communityOptions]);
+  }, [project?.id]);
 
   const toggleJid = (communityJid: string, checked: boolean): void => {
     setSelectedJids((prev) => {

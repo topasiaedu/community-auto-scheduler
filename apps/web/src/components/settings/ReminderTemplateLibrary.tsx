@@ -2,7 +2,7 @@
  * Reminder template library — six SOP slots in an accordion (#reminder-templates).
  */
 
-import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -59,16 +59,22 @@ export function ReminderTemplateLibrary({
   projectId,
 }: ReminderTemplateLibraryProps): ReactElement {
   const authorizedFetch = useAuthorizedFetch(session, projectId);
+  const signedIn = session !== null;
   const [templates, setTemplates] = useState<ReminderTemplateRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const hasLoadedOnceRef = useRef(false);
 
   const loadTemplates = useCallback(async () => {
-    if (session === null || projectId.length === 0) {
+    if (!signedIn || projectId.length === 0) {
       setTemplates([]);
+      hasLoadedOnceRef.current = false;
       return;
     }
-    setLoading(true);
+    const showLoadingGate = !hasLoadedOnceRef.current;
+    if (showLoadingGate) {
+      setLoading(true);
+    }
     setError(null);
     try {
       const res = await authorizedFetch("/templates");
@@ -81,12 +87,16 @@ export function ReminderTemplateLibrary({
       const json = (await res.json()) as { templates?: ReminderTemplateRow[] };
       const list = Array.isArray(json.templates) ? json.templates : [];
       setTemplates(list);
+      hasLoadedOnceRef.current = true;
     } finally {
-      setLoading(false);
+      if (showLoadingGate) {
+        setLoading(false);
+      }
     }
-  }, [authorizedFetch, session, projectId]);
+  }, [authorizedFetch, signedIn, projectId]);
 
   useEffect(() => {
+    hasLoadedOnceRef.current = false;
     void loadTemplates();
   }, [loadTemplates]);
 
@@ -159,7 +169,7 @@ export function ReminderTemplateLibrary({
           </div>
         ) : null}
 
-        {!loading && orderedTemplates.length > 0 ? (
+        {orderedTemplates.length > 0 ? (
           <Accordion type="multiple">
             {orderedTemplates.map((template) => (
               <AccordionItem key={template.slotKey} value={template.slotKey}>

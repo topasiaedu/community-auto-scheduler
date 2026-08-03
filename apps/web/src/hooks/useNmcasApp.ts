@@ -3,7 +3,7 @@
  * so `App.tsx` stays a thin composition layer.
  */
 
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import type { Session } from "@supabase/supabase-js";
 import { isUtcIsoAtLeastSecondsAhead, mytLocalToUtcIso, utcIsoToDatetimeLocalMyt } from "../myt.js";
@@ -35,6 +35,10 @@ import {
 export function useNmcasApp() {
   const supabase = useMemo(() => getBrowserSupabase(), []);
   const [session, setSession] = useState<Session | null>(null);
+  const sessionRef = useRef<Session | null>(null);
+  sessionRef.current = session;
+  /** Stable signed-in identity — ignore TOKEN_REFRESHED object churn. */
+  const userId = session?.user.id ?? null;
   const [authReady, setAuthReady] = useState(false);
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(false);
@@ -129,7 +133,7 @@ export function useNmcasApp() {
   const authorizedFetch = useCallback(
     async (path: string, init?: RequestInit & { skipProjectHeader?: boolean }) => {
       const headers = new Headers(init?.headers);
-      const token = session?.access_token;
+      const token = sessionRef.current?.access_token;
       if (typeof token === "string" && token.length > 0) {
         headers.set("Authorization", `Bearer ${token}`);
       }
@@ -138,7 +142,7 @@ export function useNmcasApp() {
       }
       return fetch(apiPath(path), { ...init, headers });
     },
-    [session, selectedProjectId],
+    [selectedProjectId],
   );
 
   const fetchPostImageObjectUrl = useCallback(
@@ -236,14 +240,15 @@ export function useNmcasApp() {
   }, [supabase]);
 
   const loadProjects = useCallback(async () => {
-    if (session === null) {
+    const token = sessionRef.current?.access_token;
+    if (typeof token !== "string" || token.length === 0) {
       return;
     }
     setProjectsLoading(true);
     setProjectsError(null);
     try {
       const res = await fetch(apiPath("/projects"), {
-        headers: { Authorization: `Bearer ${session.access_token}` },
+        headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
@@ -260,17 +265,17 @@ export function useNmcasApp() {
     } finally {
       setProjectsLoading(false);
     }
-  }, [session]);
+  }, []);
 
   useEffect(() => {
-    if (supabase === null || session === null) {
+    if (supabase === null || userId === null) {
       setProjects([]);
       setProjectsError(null);
       setProjectsLoading(false);
       return;
     }
     void loadProjects();
-  }, [supabase, session, loadProjects]);
+  }, [supabase, userId, loadProjects]);
 
   useEffect(() => {
     if (projects.length === 0) {
@@ -316,7 +321,7 @@ export function useNmcasApp() {
   }, []);
 
   const refreshWa = useCallback(() => {
-    if (session === null || selectedProjectId.length === 0) {
+    if (sessionRef.current === null || selectedProjectId.length === 0) {
       setWaState(null);
       return;
     }
@@ -324,10 +329,10 @@ export function useNmcasApp() {
       .then((r) => r.json() as Promise<WaStatusResponse>)
       .then(setWaState)
       .catch(() => setWaState(null));
-  }, [authorizedFetch, session, selectedProjectId]);
+  }, [authorizedFetch, selectedProjectId]);
 
   const refreshQrFromServer = useCallback(async () => {
-    if (session === null || selectedProjectId.length === 0) {
+    if (sessionRef.current === null || selectedProjectId.length === 0) {
       setQrPayload(null);
       return;
     }
@@ -350,11 +355,11 @@ export function useNmcasApp() {
     } catch {
       setQrPayload(null);
     }
-  }, [authorizedFetch, session, selectedProjectId]);
+  }, [authorizedFetch, selectedProjectId]);
 
   const refreshGroups = useCallback(
     (forceRefresh = false) => {
-      if (session === null || selectedProjectId.length === 0) {
+      if (sessionRef.current === null || selectedProjectId.length === 0) {
         setGroups([]);
         setGroupsLoading(false);
         return;
@@ -372,11 +377,11 @@ export function useNmcasApp() {
           setGroupsLoading(false);
         });
     },
-    [authorizedFetch, session, selectedProjectId],
+    [authorizedFetch, selectedProjectId],
   );
 
   const refreshMessages = useCallback(() => {
-    if (session === null || selectedProjectId.length === 0) {
+    if (sessionRef.current === null || selectedProjectId.length === 0) {
       setMessages([]);
       return;
     }
@@ -393,10 +398,10 @@ export function useNmcasApp() {
       .then((r) => r.json() as Promise<{ messages: ScheduledMessage[] }>)
       .then((j) => setMessages(j.messages))
       .catch(() => setMessages([]));
-  }, [authorizedFetch, session, selectedProjectId, filterStatus, filterType]);
+  }, [authorizedFetch, selectedProjectId, filterStatus, filterType]);
 
   const loadPreferencesAndApply = useCallback(async () => {
-    if (session === null || selectedProjectId.length === 0) {
+    if (sessionRef.current === null || selectedProjectId.length === 0) {
       return;
     }
     const res = await authorizedFetch("/preferences");
@@ -417,14 +422,14 @@ export function useNmcasApp() {
       setGroupName(pref.lastGroupName ?? "");
     }
     setPrefsApplied(true);
-  }, [authorizedFetch, session, selectedProjectId]);
+  }, [authorizedFetch, selectedProjectId]);
 
   useEffect(() => {
-    if (session === null || selectedProjectId.length === 0) {
+    if (userId === null || selectedProjectId.length === 0) {
       return;
     }
     void loadPreferencesAndApply();
-  }, [session, selectedProjectId, loadPreferencesAndApply]);
+  }, [userId, selectedProjectId, loadPreferencesAndApply]);
 
   useEffect(() => {
     if (!prefsApplied || groups.length === 0 || groupJid.length === 0) {
@@ -452,7 +457,7 @@ export function useNmcasApp() {
 
   const persistGroupPreference = useCallback(
     (jid: string, name: string) => {
-      if (session === null || selectedProjectId.length === 0 || jid.length === 0) {
+      if (sessionRef.current === null || selectedProjectId.length === 0 || jid.length === 0) {
         return;
       }
       void authorizedFetch("/preferences", {
@@ -461,11 +466,11 @@ export function useNmcasApp() {
         body: JSON.stringify({ lastGroupJid: jid, lastGroupName: name }),
       });
     },
-    [authorizedFetch, session, selectedProjectId],
+    [authorizedFetch, selectedProjectId],
   );
 
   const resetWaSession = useCallback(async () => {
-    if (session === null || selectedProjectId.length === 0) {
+    if (sessionRef.current === null || selectedProjectId.length === 0) {
       return;
     }
     setSessionResetting(true);
@@ -482,7 +487,7 @@ export function useNmcasApp() {
     } finally {
       setSessionResetting(false);
     }
-  }, [authorizedFetch, refreshQrFromServer, refreshWa, session, selectedProjectId]);
+  }, [authorizedFetch, refreshQrFromServer, refreshWa, selectedProjectId]);
 
   const onClickResetSession = () => {
     setResetSessionConfirming(true);
@@ -535,20 +540,20 @@ export function useNmcasApp() {
     }
   }, [waState?.state, refreshGroups]);
 
-  // Belt-and-suspenders: re-load groups whenever project or session changes while WA is connected.
+  // Belt-and-suspenders: re-load groups whenever project changes while WA is connected.
   // This fixes the race where waState becomes "connected" before selectedProjectId is set.
   useEffect(() => {
-    if (session !== null && selectedProjectId.length > 0 && waState?.state === "connected") {
+    if (userId !== null && selectedProjectId.length > 0 && waState?.state === "connected") {
       refreshGroups();
     }
-  }, [session, selectedProjectId, waState?.state, refreshGroups]);
+  }, [userId, selectedProjectId, waState?.state, refreshGroups]);
 
   /**
    * While connected with an empty catalog, auto-retry a few times so Schedule destinations
    * populate without requiring a WhatsApp "Load groups" click (cold cache / race after connect).
    */
   useEffect(() => {
-    if (session === null || selectedProjectId.length === 0 || waState?.state !== "connected") {
+    if (userId === null || selectedProjectId.length === 0 || waState?.state !== "connected") {
       return undefined;
     }
     if (groups.length > 0) {
@@ -565,7 +570,7 @@ export function useNmcasApp() {
       }
     }, retryMs);
     return () => window.clearInterval(t);
-  }, [session, selectedProjectId, waState?.state, groups.length, refreshGroups]);
+  }, [userId, selectedProjectId, waState?.state, groups.length, refreshGroups]);
 
   useEffect(() => {
     refreshMessages();
@@ -637,6 +642,12 @@ export function useNmcasApp() {
       setFormError("Sign in and pick a project before uploading.");
       return;
     }
+    /** Matches API `MAX_BYTES` (16 MB). Larger files never leave the browser. */
+    const maxUploadBytes = 16 * 1024 * 1024;
+    if (file.size > maxUploadBytes) {
+      setFormError("Image exceeds 16 MB. Compress or resize it, then try again.");
+      return;
+    }
     setFormError(null);
     clearImagePreviewBlob();
     setImagePreviewObjectUrl(URL.createObjectURL(file));
@@ -652,6 +663,12 @@ export function useNmcasApp() {
         if (!res.ok) {
           const err = (await res.json().catch(() => ({}))) as { error?: string };
           clearImagePreviewBlob();
+          if (res.status === 413) {
+            setFormError(
+              "Image rejected as too large by the upload proxy (413). On the API host set nginx client_max_body_size 16m and reload, or use a smaller image.",
+            );
+            return;
+          }
           setFormError(err.error ?? `Image upload failed (${String(res.status)}). Try again.`);
           return;
         }
@@ -665,6 +682,13 @@ export function useNmcasApp() {
         setImagePath(j.path);
       } catch (e) {
         clearImagePreviewBlob();
+        // nginx 413 HTML often lacks CORS headers → browser throws "Failed to fetch".
+        if (file.size > 1024 * 1024) {
+          setFormError(
+            "Upload failed — likely nginx 413 (body too large; default limit is 1 MB). Set client_max_body_size 16m on nmcas-server and reload nginx, or try a smaller image.",
+          );
+          return;
+        }
         setFormError(e instanceof Error ? e.message : "Image upload failed. Try again.");
       } finally {
         setImageUploading(false);

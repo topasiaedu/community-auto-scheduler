@@ -162,7 +162,7 @@ export function SingleMessageSection({ vm }: SingleMessageSectionProps): ReactEl
     if (canUseApiRoutes && operatorKind === "REMINDER") {
       void loadTemplates();
     }
-  }, [canUseApiRoutes, operatorKind, loadTemplates]);
+  }, [canUseApiRoutes, operatorKind, selectedProjectId, loadTemplates]);
 
   const selectedProject = useMemo(
     () => projects.find((p) => p.id === selectedProjectId),

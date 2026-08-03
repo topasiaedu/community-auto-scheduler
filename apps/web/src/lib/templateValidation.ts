@@ -49,9 +49,14 @@ export function isOptionalReminderTemplate(template: ReminderTemplateRow): boole
   return template.reminderFormat === "STICKER" || template.slotKey === "post_live_sticker";
 }
 
-/** Ready to schedule: required slots must be complete; optional sticker may be empty. */
+/** Disabled slots are omitted from this project's campaign rhythm. */
+export function isDisabledReminderTemplate(template: ReminderTemplateRow): boolean {
+  return template.enabled === false;
+}
+
+/** Ready to schedule: required enabled slots must be complete; disabled + optional sticker may be empty. */
 export function templateReadyForCampaign(template: ReminderTemplateRow): boolean {
-  if (isOptionalReminderTemplate(template)) {
+  if (isDisabledReminderTemplate(template) || isOptionalReminderTemplate(template)) {
     return true;
   }
   return templateHasRequiredAssets(template);

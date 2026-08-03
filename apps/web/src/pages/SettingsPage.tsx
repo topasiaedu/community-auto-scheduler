@@ -92,7 +92,11 @@ export function SettingsPage(): ReactElement {
         onSaved={() => void loadProjects()}
       />
 
-      <ReminderTemplateLibrary session={session} projectId={selectedProjectId} />
+      <ReminderTemplateLibrary
+        session={session}
+        projectId={selectedProjectId}
+        projectName={selectedProjectName}
+      />
 
       {/* Active workspace */}
       <Card>

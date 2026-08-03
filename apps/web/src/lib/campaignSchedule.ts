@@ -50,13 +50,15 @@ export type CampaignSlotUiStatus =
   | "scheduled"
   | "skipped_past"
   | "skipped_chosen"
-  | "skipped_no_sticker";
+  | "skipped_no_sticker"
+  | "skipped_disabled";
 
 export const CAMPAIGN_SLOT_STATUS_LABELS: Record<CampaignSlotUiStatus, string> = {
   scheduled: "Scheduled",
   skipped_past: "Skipped (past)",
   skipped_chosen: "Skipped (you chose)",
   skipped_no_sticker: "Skipped (no sticker)",
+  skipped_disabled: "Skipped (disabled for project)",
 };
 
 export type ClassifiedCampaignSlot = {
@@ -69,6 +71,7 @@ export type ClassifiedCampaignSlot = {
 export type ClassifyCampaignSlotsTemplate = {
   reminderFormat: string;
   stickerUrl: string | null;
+  enabled?: boolean;
 };
 
 export type ClassifyCampaignSlotsInput = {
@@ -309,7 +312,9 @@ export function classifyCampaignSlots(input: ClassifyCampaignSlotsInput): Classi
     const template = input.templatesBySlotKey.get(slot.slotKey);
     let status: CampaignSlotUiStatus;
 
-    if (skipSet.has(slot.slotKey)) {
+    if (template !== undefined && template.enabled === false) {
+      status = "skipped_disabled";
+    } else if (skipSet.has(slot.slotKey)) {
       status = "skipped_chosen";
     } else if (
       template !== undefined &&

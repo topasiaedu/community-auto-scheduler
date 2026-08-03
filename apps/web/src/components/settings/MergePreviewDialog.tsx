@@ -35,6 +35,8 @@ type MergePreviewDialogProps = {
   onOpenChange: (open: boolean) => void;
   slotName: string;
   bodyTemplate: string;
+  /** When set (e.g. Chinese Lucas samples), seeds the editable preview fields. */
+  initialCustomValues?: CampaignCustomValues;
 };
 
 export function MergePreviewDialog({
@@ -42,14 +44,15 @@ export function MergePreviewDialog({
   onOpenChange,
   slotName,
   bodyTemplate,
+  initialCustomValues = SAMPLE_CUSTOM_VALUES,
 }: MergePreviewDialogProps): ReactElement {
-  const [customValues, setCustomValues] = useState<CampaignCustomValues>(SAMPLE_CUSTOM_VALUES);
+  const [customValues, setCustomValues] = useState<CampaignCustomValues>(initialCustomValues);
 
   useEffect(() => {
     if (open) {
-      setCustomValues(SAMPLE_CUSTOM_VALUES);
+      setCustomValues(initialCustomValues);
     }
-  }, [open]);
+  }, [open, initialCustomValues]);
 
   const merged = useMemo(
     () => mergeTemplate(customValues, bodyTemplate),

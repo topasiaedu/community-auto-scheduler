@@ -115,6 +115,7 @@ export type ReminderTemplateRow = {
   mediaUrl: string | null;
   stickerUrl: string | null;
   bodyTemplate: string | null;
+  enabled: boolean;
   scheduleRuleKind: ScheduleRuleKind;
   dayOffset: number | null;
   clockTimeMyt: string | null;

@@ -13,12 +13,14 @@ const imageTemplate = {
   slotKey: "welcome",
   reminderFormat: "IMAGE" as const,
   stickerUrl: null,
+  enabled: true,
 };
 
 const stickerTemplate = {
   slotKey: "post_live_sticker",
   reminderFormat: "STICKER" as const,
   stickerUrl: null,
+  enabled: true,
 };
 
 const stickerWithAsset = {
@@ -92,5 +94,16 @@ describe("campaignSlotSkip", () => {
       skipSlotKeys: new Set(),
     });
     assert.deepEqual(decision, { schedule: false, reason: "past" });
+  });
+
+  it("skips disabled slots with reason disabled (over past)", () => {
+    const pastAt = new Date(NOW_MS - 60_000);
+    const decision = classifyReminderSlot({
+      template: { ...imageTemplate, enabled: false },
+      scheduledAt: pastAt,
+      nowMs: NOW_MS,
+      skipSlotKeys: new Set(),
+    });
+    assert.deepEqual(decision, { schedule: false, reason: "disabled" });
   });
 });

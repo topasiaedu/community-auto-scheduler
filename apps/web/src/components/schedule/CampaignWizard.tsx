@@ -32,6 +32,7 @@ import {
 } from "../../lib/campaignSchedule.js";
 import { formatUtcIsoMyt, REMINDER_SLOT_LABELS } from "../../lib/campaignFormat.js";
 import {
+  customValuesLocaleForProject,
   deriveCustomValues,
   loadZoomDefaults,
   saveZoomDefaults,
@@ -132,6 +133,7 @@ export function CampaignWizard({ vm }: CampaignWizardProps): ReactElement {
 
   const selectedProject = vm.projects.find((p) => p.id === vm.selectedProjectId);
   const sopUrl = selectedProject?.sopUrl ?? null;
+  const copyLocale = customValuesLocaleForProject(selectedProject?.name ?? "");
 
   useEffect(() => {
     setZoomFields(loadZoomDefaults(selectedProjectId));
@@ -139,10 +141,10 @@ export function CampaignWizard({ vm }: CampaignWizardProps): ReactElement {
 
   const customValues: CampaignCustomValues = useMemo(() => {
     if (webinarDate.length === 0) {
-      return deriveCustomValues("2099-01-01", eventStartTimeMyt, zoomFields);
+      return deriveCustomValues("2099-01-01", eventStartTimeMyt, zoomFields, copyLocale);
     }
-    return deriveCustomValues(webinarDate, eventStartTimeMyt, zoomFields);
-  }, [webinarDate, eventStartTimeMyt, zoomFields]);
+    return deriveCustomValues(webinarDate, eventStartTimeMyt, zoomFields, copyLocale);
+  }, [webinarDate, eventStartTimeMyt, zoomFields, copyLocale]);
 
   const showUpSlots = useMemo(() => {
     if (webinarDate.length === 0) {
@@ -158,12 +160,13 @@ export function CampaignWizard({ vm }: CampaignWizardProps): ReactElement {
   const templatesBySlotKey = useMemo(() => {
     const map = new Map<
       string,
-      { reminderFormat: string; stickerUrl: string | null }
+      { reminderFormat: string; stickerUrl: string | null; enabled: boolean }
     >();
     for (const t of templates) {
       map.set(t.slotKey, {
         reminderFormat: t.reminderFormat,
         stickerUrl: t.stickerUrl,
+        enabled: t.enabled,
       });
     }
     return map;
@@ -327,8 +330,11 @@ export function CampaignWizard({ vm }: CampaignWizardProps): ReactElement {
       if (!templateReadyForCampaign(t)) {
         return false;
       }
+      if (t.enabled === false || t.reminderFormat === "STICKER") {
+        continue;
+      }
       const preview = mergePreviewForSlot(t, customValues);
-      if (!preview.ok && t.reminderFormat !== "STICKER") {
+      if (!preview.ok) {
         return false;
       }
     }
@@ -340,7 +346,7 @@ export function CampaignWizard({ vm }: CampaignWizardProps): ReactElement {
   const buildSchedulePayload = (): Record<string, unknown> => ({
     webinarDate,
     eventStartTimeMyt,
-    customValues: deriveCustomValues(webinarDate, eventStartTimeMyt, zoomFields),
+    customValues: deriveCustomValues(webinarDate, eventStartTimeMyt, zoomFields, copyLocale),
     reminderGroupJid,
     reminderGroupName,
     valuePosts: [],

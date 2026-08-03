@@ -1,23 +1,66 @@
 /**
  * Derives SOP Custom Values from webinar date + event start (MYT).
  * Zoom fields are entered separately by the operator each campaign.
+ *
+ * Locale:
+ * - `en` — Dr Jasmine SOP style (`Monday`, `13/7`, `8PM (GMT +8)`)
+ * - `zh-CN` — Chinese community style (`星期四`, `8月6号`, `8PM`)
  */
 
 import type { CampaignCustomValues } from "../types/models.js";
 
 const MYT_TIME_ZONE = "Asia/Kuala_Lumpur";
 
+export type CustomValuesLocale = "en" | "zh-CN";
+
+const ZH_WEEKDAYS = [
+  "星期日",
+  "星期一",
+  "星期二",
+  "星期三",
+  "星期四",
+  "星期五",
+  "星期六",
+] as const;
+
 function parseYmd(ymd: string): Date {
   return new Date(`${ymd}T12:00:00+08:00`);
 }
 
-function formatWorkshopDay(ymd: string): string {
+function mytParts(
+  ymd: string,
+): { year: number; month: number; day: number; weekday: number } {
+  const d = parseYmd(ymd);
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: MYT_TIME_ZONE,
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    weekday: "short",
+  }).formatToParts(d);
+  const year = Number(parts.find((p) => p.type === "year")?.value);
+  const month = Number(parts.find((p) => p.type === "month")?.value);
+  const day = Number(parts.find((p) => p.type === "day")?.value);
+  // getDay() in MYT via noon+08 date is reliable for calendar YMD
+  const weekday = d.getUTCDay();
+  return { year, month, day, weekday };
+}
+
+function formatWorkshopDay(ymd: string, locale: CustomValuesLocale): string {
+  if (locale === "zh-CN") {
+    const { weekday } = mytParts(ymd);
+    return ZH_WEEKDAYS[weekday] ?? "星期日";
+  }
   const d = parseYmd(ymd);
   return d.toLocaleDateString("en-GB", { weekday: "long", timeZone: MYT_TIME_ZONE });
 }
 
-/** SOP style: `13/7` (no leading zero on month). */
-function formatWorkshopDate(ymd: string): string {
+/** `en`: `13/7`. `zh-CN`: `8月6号` (Kheli / Chinese community style). */
+function formatWorkshopDate(ymd: string, locale: CustomValuesLocale): string {
+  if (locale === "zh-CN") {
+    const { month, day } = mytParts(ymd);
+    return `${String(month)}月${String(day)}号`;
+  }
   const d = parseYmd(ymd);
   const parts = new Intl.DateTimeFormat("en-GB", {
     day: "numeric",
@@ -29,25 +72,38 @@ function formatWorkshopDate(ymd: string): string {
   return `${day}/${month}`;
 }
 
-/** SOP style: `8PM (GMT +8)`. */
-function formatWorkshopTime(eventStartTimeMyt: string): string {
+/**
+ * `en`: `8PM (GMT +8)`.
+ * `zh-CN`: `8PM` only — Chinese templates already include 晚上 / （GMT+8）.
+ */
+function formatWorkshopTime(
+  eventStartTimeMyt: string,
+  locale: CustomValuesLocale,
+): string {
   const [hStr, mStr] = eventStartTimeMyt.split(":");
   const h = Number(hStr);
   const m = Number(mStr);
   if (!Number.isFinite(h) || !Number.isFinite(m)) {
-    return "8PM (GMT +8)";
+    return locale === "zh-CN" ? "8PM" : "8PM (GMT +8)";
   }
   const period = h >= 12 ? "PM" : "AM";
   const hour12 = h % 12 === 0 ? 12 : h % 12;
-  if (m === 0) {
-    return `${String(hour12)}${period} (GMT +8)`;
+  const clock =
+    m === 0
+      ? `${String(hour12)}${period}`
+      : `${String(hour12)}:${String(m).padStart(2, "0")}${period}`;
+  if (locale === "zh-CN") {
+    return clock;
   }
-  const mm = String(m).padStart(2, "0");
-  return `${String(hour12)}:${mm}${period} (GMT +8)`;
+  return `${clock} (GMT +8)`;
 }
 
-/** SOP style: `July 13, 2026`. */
-function formatSessionDate(ymd: string): string {
+/** `en`: `July 13, 2026`. `zh-CN`: `2026年8月6日`. */
+function formatSessionDate(ymd: string, locale: CustomValuesLocale): string {
+  if (locale === "zh-CN") {
+    const { year, month, day } = mytParts(ymd);
+    return `${String(year)}年${String(month)}月${String(day)}日`;
+  }
   const d = parseYmd(ymd);
   return d.toLocaleDateString("en-US", {
     month: "long",
@@ -89,19 +145,30 @@ export const ZOOM_FIELD_PLACEHOLDERS: ZoomFields = {
 };
 
 /**
+ * Projects with Chinese reminder copy (e.g. Lucas) get zh-CN merge values.
+ */
+export function customValuesLocaleForProject(projectName: string): CustomValuesLocale {
+  if (/lucas/i.test(projectName)) {
+    return "zh-CN";
+  }
+  return "en";
+}
+
+/**
  * Builds full Custom Values for template merge from anchors + zoom fields.
  */
 export function deriveCustomValues(
   webinarDate: string,
   eventStartTimeMyt: string,
   zoom: ZoomFields,
+  locale: CustomValuesLocale = "en",
 ): CampaignCustomValues {
   return {
-    workshopDay: formatWorkshopDay(webinarDate),
-    workshopDate: formatWorkshopDate(webinarDate),
-    workshopTime: formatWorkshopTime(eventStartTimeMyt),
+    workshopDay: formatWorkshopDay(webinarDate, locale),
+    workshopDate: formatWorkshopDate(webinarDate, locale),
+    workshopTime: formatWorkshopTime(eventStartTimeMyt, locale),
     zoomLink: zoom.zoomLink.trim(),
-    sessionDate: formatSessionDate(webinarDate),
+    sessionDate: formatSessionDate(webinarDate, locale),
     sessionTime: formatSessionTime(eventStartTimeMyt),
     zoomId: zoom.zoomId.trim(),
     zoomPasscode: zoom.zoomPasscode.trim(),

@@ -14,6 +14,12 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { useAuthorizedFetch } from "../../hooks/useAuthorizedFetch.js";
+import {
+  isDisabledReminderTemplate,
+  isOptionalReminderTemplate,
+  templateHasRequiredAssets,
+  templateReadyForCampaign,
+} from "../../lib/templateValidation.js";
 import type { ReminderTemplateRow } from "../../types/models.js";
 import { ReminderTemplateSlotPanel } from "./ReminderTemplateSlotPanel.js";
 
@@ -22,41 +28,29 @@ const SLOT_ORDER = [
   "countdown_2d",
   "countdown_1d",
   "starting_soon",
+  "countdown_1h",
   "live_now",
   "post_live_sticker",
 ] as const;
 
-function slotHasRequiredAsset(template: ReminderTemplateRow): boolean {
-  if (template.reminderFormat === "IMAGE") {
-    return template.mediaUrl !== null && template.mediaUrl.length > 0;
-  }
-  if (template.reminderFormat === "TEXT") {
-    return template.bodyTemplate !== null && template.bodyTemplate.trim().length > 0;
-  }
-  if (template.reminderFormat === "STICKER") {
-    return template.stickerUrl !== null && template.stickerUrl.length > 0;
-  }
-  return false;
-}
-
-function isOptionalSlot(template: ReminderTemplateRow): boolean {
-  return template.reminderFormat === "STICKER" || template.slotKey === "post_live_sticker";
-}
-
-/** Required slots must be configured; sticker is optional. */
+/** Required enabled slots must be configured; disabled + sticker are exempt. */
 function campaignReady(templates: ReminderTemplateRow[]): boolean {
-  const required = templates.filter((t) => !isOptionalSlot(t));
-  return required.length > 0 && required.every(slotHasRequiredAsset);
+  const required = templates.filter(
+    (t) => !isDisabledReminderTemplate(t) && !isOptionalReminderTemplate(t),
+  );
+  return required.length > 0 && required.every(templateReadyForCampaign);
 }
 
 type ReminderTemplateLibraryProps = {
   session: Session | null;
   projectId: string;
+  projectName?: string;
 };
 
 export function ReminderTemplateLibrary({
   session,
   projectId,
+  projectName = "",
 }: ReminderTemplateLibraryProps): ReactElement {
   const authorizedFetch = useAuthorizedFetch(session, projectId);
   const signedIn = session !== null;
@@ -108,10 +102,11 @@ export function ReminderTemplateLibrary({
   }, [templates]);
 
   const ready = campaignReady(orderedTemplates);
-  const requiredCount = orderedTemplates.filter((t) => !isOptionalSlot(t)).length;
-  const requiredConfigured = orderedTemplates.filter(
-    (t) => !isOptionalSlot(t) && slotHasRequiredAsset(t),
-  ).length;
+  const requiredTemplates = orderedTemplates.filter(
+    (t) => !isDisabledReminderTemplate(t) && !isOptionalReminderTemplate(t),
+  );
+  const requiredCount = requiredTemplates.length;
+  const requiredConfigured = requiredTemplates.filter((t) => templateHasRequiredAssets(t)).length;
 
   const onTemplateSaved = (updated: ReminderTemplateRow) => {
     setTemplates((prev) =>
@@ -135,14 +130,15 @@ export function ReminderTemplateLibrary({
       <CardHeader>
         <CardTitle className="text-base">Reminder template library</CardTitle>
         <CardDescription>
-          Upload SOP images once per project. Post-live sticker is optional until you have a WebP.
+          Upload SOP images once per project. Disable slots this project does not use. Post-live
+          sticker is optional until you have a WebP.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {!ready && !loading ? (
           <p className="text-sm text-muted-foreground rounded-md border border-dashed border-border bg-muted/30 px-4 py-3">
-            Upload Welcome, countdown, and Starting Soon images (and keep LIVE NOW text) before your
-            first campaign. Sticker can wait.
+            Configure enabled reminder slots (images + captions) before your first campaign. Disabled
+            slots are skipped. Sticker can wait.
           </p>
         ) : null}
 
@@ -175,12 +171,18 @@ export function ReminderTemplateLibrary({
               <AccordionItem key={template.slotKey} value={template.slotKey}>
                 <AccordionTrigger value={template.slotKey}>
                   <span className="flex items-center gap-2">
-                    <span>{template.name}</span>
-                    {slotHasRequiredAsset(template) ? (
+                    <span className={template.enabled === false ? "text-muted-foreground" : undefined}>
+                      {template.name}
+                    </span>
+                    {template.enabled === false ? (
+                      <Badge variant="secondary" className="font-normal">
+                        Disabled
+                      </Badge>
+                    ) : templateHasRequiredAssets(template) ? (
                       <Badge variant="outline" className="font-normal">
                         Configured
                       </Badge>
-                    ) : isOptionalSlot(template) ? (
+                    ) : isOptionalReminderTemplate(template) ? (
                       <Badge variant="secondary" className="font-normal">
                         Optional
                       </Badge>
@@ -195,6 +197,7 @@ export function ReminderTemplateLibrary({
                   <ReminderTemplateSlotPanel
                     session={session}
                     projectId={projectId}
+                    projectName={projectName}
                     template={template}
                     onSaved={onTemplateSaved}
                   />

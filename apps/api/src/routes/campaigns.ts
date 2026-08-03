@@ -195,6 +195,9 @@ export function registerCampaignRoutes(
     }
 
     for (const template of templates) {
+      if (template.enabled === false) {
+        continue;
+      }
       const assetErr = validateTemplateAssets(template);
       if (assetErr !== undefined) {
         return reply.code(400).send({ error: assetErr });

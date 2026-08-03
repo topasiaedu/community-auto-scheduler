@@ -36,7 +36,7 @@ import {
 } from "../../lib/singleMessageBuilders.js";
 import { resolveValueFanOutDestinationsForProject } from "../../lib/valueFanOut.js";
 import { mergeTemplate } from "../../lib/mergeTemplate.js";
-import { SAMPLE_CUSTOM_VALUES } from "../../lib/sampleCustomValues.js";
+import { SAMPLE_CUSTOM_VALUES, sampleCustomValuesForProject } from "../../lib/sampleCustomValues.js";
 import { templateHasRequiredAssets } from "../../lib/templateValidation.js";
 import { useMediaObjectUrl } from "../../hooks/useMediaObjectUrl.js";
 import type { NmcasViewModel } from "../../hooks/useNmcasApp.js";
@@ -114,6 +114,15 @@ export function SingleMessageSection({ vm }: SingleMessageSectionProps): ReactEl
 
   const isEditing = editingDraftId !== null;
 
+  const selectedProject = useMemo(
+    () => projects.find((p) => p.id === selectedProjectId),
+    [projects, selectedProjectId],
+  );
+
+  useEffect(() => {
+    setCustomValues(sampleCustomValuesForProject(selectedProject?.name ?? ""));
+  }, [selectedProject?.name]);
+
   const selectedTemplate = useMemo(
     () => templates.find((t) => t.slotKey === selectedSlotKey),
     [templates, selectedSlotKey],
@@ -163,11 +172,6 @@ export function SingleMessageSection({ vm }: SingleMessageSectionProps): ReactEl
       void loadTemplates();
     }
   }, [canUseApiRoutes, operatorKind, selectedProjectId, loadTemplates]);
-
-  const selectedProject = useMemo(
-    () => projects.find((p) => p.id === selectedProjectId),
-    [projects, selectedProjectId],
-  );
 
   const valueFanOut = useMemo(() => {
     const activeCommunityJids = selectedProject?.activeCommunityJids ?? null;

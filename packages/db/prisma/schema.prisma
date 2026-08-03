@@ -110,6 +110,8 @@ model ReminderTemplate {
   mediaUrl           String?
   stickerUrl         String?
   bodyTemplate       String?
+  /// When false, slot is omitted from campaign scheduling (per-project rhythm).
+  enabled            Boolean            @default(true)
   scheduleRuleKind   ScheduleRuleKind
   dayOffset          Int?
   clockTimeMyt       String?

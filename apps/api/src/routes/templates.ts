@@ -14,16 +14,18 @@ const VALID_SLOT_KEYS = new Set(
 
 const PatchTemplateBodySchema = z
   .object({
-    mediaUrl: z.string().min(1).max(2048).optional(),
-    stickerUrl: z.string().min(1).max(2048).optional(),
+    mediaUrl: z.string().min(1).max(2048).nullable().optional(),
+    stickerUrl: z.string().min(1).max(2048).nullable().optional(),
     bodyTemplate: z.string().max(16000).optional(),
+    enabled: z.boolean().optional(),
   })
   .refine(
     (b) =>
       b.mediaUrl !== undefined ||
       b.stickerUrl !== undefined ||
-      b.bodyTemplate !== undefined,
-    { message: "Provide at least one of mediaUrl, stickerUrl, or bodyTemplate" },
+      b.bodyTemplate !== undefined ||
+      b.enabled !== undefined,
+    { message: "Provide at least one of mediaUrl, stickerUrl, bodyTemplate, or enabled" },
   );
 
 function templateToJson(row: {
@@ -34,6 +36,7 @@ function templateToJson(row: {
   mediaUrl: string | null;
   stickerUrl: string | null;
   bodyTemplate: string | null;
+  enabled: boolean;
   scheduleRuleKind: string;
   dayOffset: number | null;
   clockTimeMyt: string | null;
@@ -48,6 +51,7 @@ function templateToJson(row: {
     mediaUrl: row.mediaUrl,
     stickerUrl: row.stickerUrl,
     bodyTemplate: row.bodyTemplate,
+    enabled: row.enabled,
     scheduleRuleKind: row.scheduleRuleKind,
     dayOffset: row.dayOffset,
     clockTimeMyt: row.clockTimeMyt,
@@ -66,11 +70,12 @@ function validatePatchForFormat(
   body: z.infer<typeof PatchTemplateBodySchema>,
 ): string | undefined {
   if (format === "IMAGE") {
-    if (body.stickerUrl !== undefined) {
+    if (body.stickerUrl !== undefined && body.stickerUrl !== null) {
       return "stickerUrl is not allowed for IMAGE templates";
     }
     if (
       body.mediaUrl !== undefined &&
+      body.mediaUrl !== null &&
       !validateMediaPath(body.mediaUrl, `reminders/${projectId}/`)
     ) {
       return "mediaUrl must be under reminders/{projectId}/";
@@ -84,7 +89,10 @@ function validatePatchForFormat(
     return undefined;
   }
   if (format === "TEXT") {
-    if (body.mediaUrl !== undefined || body.stickerUrl !== undefined) {
+    if (
+      (body.mediaUrl !== undefined && body.mediaUrl !== null) ||
+      (body.stickerUrl !== undefined && body.stickerUrl !== null)
+    ) {
       return "mediaUrl and stickerUrl are not allowed for TEXT templates";
     }
     if (
@@ -99,11 +107,12 @@ function validatePatchForFormat(
     if (body.bodyTemplate !== undefined && body.bodyTemplate.trim().length > 0) {
       return "bodyTemplate must be empty for STICKER templates";
     }
-    if (body.mediaUrl !== undefined) {
+    if (body.mediaUrl !== undefined && body.mediaUrl !== null) {
       return "mediaUrl is not allowed for STICKER templates";
     }
     if (
       body.stickerUrl !== undefined &&
+      body.stickerUrl !== null &&
       !validateMediaPath(body.stickerUrl, `stickers/${projectId}/`)
     ) {
       return "stickerUrl must be under stickers/{projectId}/";
@@ -184,6 +193,7 @@ export function registerTemplateRoutes(app: FastifyInstance, prisma: PrismaClien
       mediaUrl?: string | null;
       stickerUrl?: string | null;
       bodyTemplate?: string | null;
+      enabled?: boolean;
     } = {};
     if (parsed.data.mediaUrl !== undefined) {
       data.mediaUrl = parsed.data.mediaUrl;
@@ -193,6 +203,9 @@ export function registerTemplateRoutes(app: FastifyInstance, prisma: PrismaClien
     }
     if (parsed.data.bodyTemplate !== undefined) {
       data.bodyTemplate = parsed.data.bodyTemplate;
+    }
+    if (parsed.data.enabled !== undefined) {
+      data.enabled = parsed.data.enabled;
     }
     const updated = await prisma.reminderTemplate.update({
       where: { projectId_slotKey: { projectId, slotKey } },

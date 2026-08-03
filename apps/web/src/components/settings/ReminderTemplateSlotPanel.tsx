@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuthorizedFetch } from "../../hooks/useAuthorizedFetch.js";
 import { formatScheduleRuleLabel } from "../../lib/scheduleRuleLabel.js";
+import { sampleCustomValuesForProject } from "../../lib/sampleCustomValues.js";
 import type { ReminderTemplateRow } from "../../types/models.js";
 import { MediaDropZone } from "./MediaDropZone.js";
 import { MergePreviewDialog } from "./MergePreviewDialog.js";
@@ -19,6 +20,7 @@ import { MergePreviewDialog } from "./MergePreviewDialog.js";
 type ReminderTemplateSlotPanelProps = {
   session: Session | null;
   projectId: string;
+  projectName?: string;
   template: ReminderTemplateRow;
   onSaved: (template: ReminderTemplateRow) => void;
 };
@@ -37,6 +39,7 @@ function formatBadgeLabel(format: ReminderTemplateRow["reminderFormat"]): string
 export function ReminderTemplateSlotPanel({
   session,
   projectId,
+  projectName = "",
   template,
   onSaved,
 }: ReminderTemplateSlotPanelProps): ReactElement {
@@ -47,6 +50,7 @@ export function ReminderTemplateSlotPanel({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [togglingEnabled, setTogglingEnabled] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -208,16 +212,66 @@ export function ReminderTemplateSlotPanel({
     })();
   };
 
+  const onToggleEnabled = () => {
+    if (session === null || projectId.length === 0) {
+      return;
+    }
+    const nextEnabled = template.enabled === false;
+    setTogglingEnabled(true);
+    setError(null);
+    void (async () => {
+      const res = await authorizedFetch(`/templates/${template.slotKey}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: nextEnabled }),
+      });
+      if (!res.ok) {
+        const err = (await res.json().catch(() => ({}))) as { error?: string };
+        setError(err.error ?? `Update failed (${String(res.status)})`);
+        setTogglingEnabled(false);
+        return;
+      }
+      const json = (await res.json()) as { template?: ReminderTemplateRow };
+      if (json.template !== undefined) {
+        onSaved(json.template);
+      }
+      setTogglingEnabled(false);
+      toast.success(
+        nextEnabled
+          ? `${template.name} enabled for campaigns`
+          : `${template.name} disabled for this project`,
+      );
+    })();
+  };
+
   const showBodyEditor = template.reminderFormat !== "STICKER";
   const canPreviewMerge =
     showBodyEditor && bodyTemplate.trim().length > 0;
+  const isEnabled = template.enabled !== false;
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <Badge variant="secondary">{formatBadgeLabel(template.reminderFormat)}</Badge>
-        <p className="text-sm text-muted-foreground">{formatScheduleRuleLabel(template)}</p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="secondary">{formatBadgeLabel(template.reminderFormat)}</Badge>
+          <p className="text-sm text-muted-foreground">{formatScheduleRuleLabel(template)}</p>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={togglingEnabled || session === null}
+          onClick={onToggleEnabled}
+        >
+          {togglingEnabled ? "Updating…" : isEnabled ? "Disable for project" : "Enable for project"}
+        </Button>
       </div>
+
+      {!isEnabled ? (
+        <p className="text-sm text-muted-foreground rounded-md border border-dashed border-border bg-muted/30 px-3 py-2">
+          This slot is disabled for this project and will be skipped when scheduling campaigns.
+        </p>
+      ) : null}
 
       {template.reminderFormat !== "TEXT" ? (
         <div className="space-y-2">
@@ -314,6 +368,7 @@ export function ReminderTemplateSlotPanel({
           onOpenChange={setPreviewOpen}
           slotName={template.name}
           bodyTemplate={bodyTemplate}
+          initialCustomValues={sampleCustomValuesForProject(projectName)}
         />
       ) : null}
     </div>

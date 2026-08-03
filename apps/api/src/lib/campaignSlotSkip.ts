@@ -6,14 +6,17 @@ import type { ReminderTemplate } from "@nmcas/db";
 
 export const CAMPAIGN_MIN_LEAD_MS = 15_000;
 
-export type CampaignSlotSkipReason = "past" | "skipped" | "no_asset";
+export type CampaignSlotSkipReason = "past" | "skipped" | "no_asset" | "disabled";
 
 export type SkippedCampaignSlot = {
   slotKey: string;
   reason: CampaignSlotSkipReason;
 };
 
-type ReminderTemplateLike = Pick<ReminderTemplate, "slotKey" | "reminderFormat" | "stickerUrl">;
+type ReminderTemplateLike = Pick<
+  ReminderTemplate,
+  "slotKey" | "reminderFormat" | "stickerUrl" | "enabled"
+>;
 
 export type ClassifyReminderSlotParams = {
   template: ReminderTemplateLike;
@@ -38,12 +41,15 @@ export function stickerHasAsset(template: ReminderTemplateLike): boolean {
 
 /**
  * Classifies whether a reminder slot should be created and why it might be skipped.
- * Operator skip takes precedence over past / no-asset.
+ * Disabled slots and operator skip take precedence over past / no-asset.
  */
 export function classifyReminderSlot(params: ClassifyReminderSlotParams): ReminderSlotDecision {
   const { template, scheduledAt, nowMs, skipSlotKeys } = params;
   const minTime = nowMs + CAMPAIGN_MIN_LEAD_MS;
 
+  if (template.enabled === false) {
+    return { schedule: false, reason: "disabled" };
+  }
   if (skipSlotKeys.has(template.slotKey)) {
     return { schedule: false, reason: "skipped" };
   }

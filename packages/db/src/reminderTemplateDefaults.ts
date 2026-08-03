@@ -284,8 +284,10 @@ export const REMINDER_TEMPLATE_SLOT_DEFINITIONS: readonly ReminderTemplateSlotDe
 ] as const;
 
 /**
- * Seeds Show Up reminder template slots for a project.
- * Preserves uploaded `mediaUrl` / `stickerUrl`; refreshes SOP caption copy + schedule metadata.
+ * Ensures Show Up reminder template slots exist for a project.
+ * Creates missing rows with SOP default caption copy. On existing rows, refreshes
+ * schedule metadata only — preserves `bodyTemplate`, `mediaUrl`, and `stickerUrl`
+ * so Settings edits stick across project switches and reloads.
  */
 export async function seedReminderTemplatesForProject(
   prisma: PrismaClient,
@@ -313,7 +315,6 @@ export async function seedReminderTemplatesForProject(
       update: {
         name: slot.name,
         reminderFormat: slot.reminderFormat,
-        bodyTemplate: slot.bodyTemplate,
         scheduleRuleKind: slot.scheduleRuleKind,
         dayOffset: slot.dayOffset,
         clockTimeMyt: slot.clockTimeMyt,

@@ -2,8 +2,9 @@ import type { PrismaClient } from "@nmcas/db";
 import { seedReminderTemplatesForProject } from "@nmcas/db";
 
 /**
- * Ensures all six SOP reminder template slots exist and caption copy matches the
- * current SOP defaults. Uploaded mediaUrl / stickerUrl are preserved.
+ * Ensures all SOP reminder template slots exist for a project.
+ * Missing slots get SOP default caption copy; existing bodyTemplate / media
+ * edits are preserved (schedule metadata may still refresh).
  */
 export async function ensureReminderTemplates(
   prisma: PrismaClient,

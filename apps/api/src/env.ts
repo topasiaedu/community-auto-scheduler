@@ -73,6 +73,28 @@ const EnvSchema = z.object({
       }
       return digits;
     }),
+  /**
+   * Daily WhatsApp ops digest (platform status + today's scheduled messages).
+   * Kill-switch: `false` / `0` / `no` / `off`.
+   */
+  NMCAS_DIGEST_ENABLED: z.preprocess((raw) => {
+    if (raw === undefined) {
+      return undefined;
+    }
+    const asString = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+    if (asString === "") {
+      return undefined;
+    }
+    if (["false", "0", "no", "off"].includes(asString)) {
+      return false;
+    }
+    if (["true", "1", "yes", "on"].includes(asString)) {
+      return true;
+    }
+    return undefined;
+  }, z.boolean().default(true)),
+  /** Local hour in Asia/Kuala_Lumpur (0–23) when the daily digest DM is sent. */
+  NMCAS_DIGEST_HOUR_MYT: z.coerce.number().int().min(0).max(23).default(8),
 });
 
 export type ApiEnv = z.infer<typeof EnvSchema>;

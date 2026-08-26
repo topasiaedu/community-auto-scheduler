@@ -4,6 +4,7 @@
  */
 
 import type { ReactElement } from "react";
+import { WhatsAppFormattedText } from "../lib/whatsappFormattedText.js";
 import type { MessageKind } from "../types/models.js";
 
 type MessagePreviewProps = {
@@ -76,7 +77,7 @@ export function MessagePreview({
                 />
               ) : null}
               {copyText.trim().length > 0 ? (
-                <p className="preview-bubble__text">{copyText}</p>
+                <WhatsAppFormattedText text={copyText} className="preview-bubble__text" />
               ) : null}
               <span className="preview-bubble__time">{timeLabel ?? "—"}</span>
             </div>

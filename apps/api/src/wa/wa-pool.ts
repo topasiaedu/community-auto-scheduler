@@ -9,6 +9,7 @@
 
 import type { PrismaClient } from "@nmcas/db";
 import type { ApiEnv } from "../env.js";
+import type { WaConnectionUiState } from "./wa-manager.js";
 import { WaManager } from "./wa-manager.js";
 
 export class WaConnectionPool {
@@ -75,6 +76,31 @@ export class WaConnectionPool {
   /** Number of in-memory WaManagers (each may own a Go whatsmeow process). */
   getWarmClientCount(): number {
     return this.managers.size;
+  }
+
+  /**
+   * In-memory status for a project that is already warm. Does not create or start a manager.
+   * Returns null when the project has no live client in this process.
+   */
+  peekStatusSnapshot(
+    projectId: string,
+  ): { state: WaConnectionUiState; hasQr: boolean } | null {
+    const manager = this.managers.get(projectId.trim());
+    if (manager === undefined) {
+      return null;
+    }
+    return manager.getStatusSnapshot();
+  }
+
+  /**
+   * Send-ready check without creating a manager. Returns false when cold.
+   */
+  async peekIsSendReady(projectId: string): Promise<boolean> {
+    const manager = this.managers.get(projectId.trim());
+    if (manager === undefined) {
+      return false;
+    }
+    return manager.isSendReady();
   }
 
   /**

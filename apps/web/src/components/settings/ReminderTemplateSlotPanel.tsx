@@ -333,6 +333,9 @@ export function ReminderTemplateSlotPanel({
             {" {{zoomLink}}"}, {"{{sessionDate}}"}, {"{{sessionTime}}"}, {"{{zoomId}}"},
             {" {{zoomPasscode}}"}
           </p>
+          <p className="text-xs text-muted-foreground">
+            WhatsApp bold uses *text* (single asterisks), not **text**.
+          </p>
         </div>
       ) : (
         <p className="text-sm text-muted-foreground">

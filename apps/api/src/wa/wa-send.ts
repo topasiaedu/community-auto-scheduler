@@ -6,6 +6,7 @@ import { mkdtemp, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SendResponse, WhatsmeowClient } from "@whatsmeow-node/whatsmeow-node";
+import { normalizeWhatsAppText } from "../lib/whatsappTextFormat.js";
 import { createMessageContextInfo } from "./message-secret.js";
 
 /**
@@ -18,7 +19,7 @@ export async function sendGroupText(
   text: string,
 ): Promise<SendResponse> {
   return client.sendRawMessage(groupJid, {
-    conversation: text,
+    conversation: normalizeWhatsAppText(text),
     messageContextInfo: createMessageContextInfo(),
   });
 }
@@ -45,7 +46,7 @@ export async function sendGroupImage(
     mimetype,
   };
   if (caption.trim().length > 0) {
-    imageMessage.caption = caption;
+    imageMessage.caption = normalizeWhatsAppText(caption);
   }
   return client.sendRawMessage(groupJid, {
     imageMessage,

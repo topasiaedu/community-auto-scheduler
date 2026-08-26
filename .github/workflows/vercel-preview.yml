@@ -1,0 +1,104 @@
+# Preview deploy for pull requests, with the URL posted back to the PR.
+# Uses the company/owner Vercel token so personal GitHub commit emails never block the build.
+name: Vercel Preview
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+# One preview deploy per pull request; supersede older runs on new pushes.
+concurrency:
+  group: vercel-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+jobs:
+  deploy-preview:
+    name: Deploy preview
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Fork pull requests receive no secrets, so skip them instead of failing loudly.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@59.5.0
+
+      - name: Pull preview environment
+        run: vercel pull --yes --environment=preview --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Build preview
+        run: vercel build --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Deploy preview
+        id: deploy
+        run: |
+          url="$(vercel deploy --prebuilt --token=${{ secrets.VERCEL_TOKEN }})"
+          echo "url=${url}" >> "${GITHUB_OUTPUT}"
+          echo "Preview URL: ${url}"
+
+      # Post the preview URL, updating the existing comment instead of adding a new one.
+      - name: Comment preview URL on pull request
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = "## Preview deployment";
+            const url = "${{ steps.deploy.outputs.url }}";
+
+            if (!url) {
+              core.setFailed("Deploy step produced no URL.");
+              return;
+            }
+
+            const body = [
+              marker,
+              "",
+              `- URL: ${url}`,
+              `- Commit: ${context.sha}`,
+              "",
+              "Deployed with the company Vercel token via GitHub Actions."
+            ].join("\n");
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            });
+
+            const existing = comments.find((comment) => {
+              return Boolean(comment.body) && comment.body.startsWith(marker);
+            });
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body
+              });
+              return;
+            }
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body
+            });

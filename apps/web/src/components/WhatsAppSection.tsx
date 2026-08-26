@@ -36,6 +36,7 @@ export function WhatsAppSection({ vm }: WhatsAppSectionProps): ReactElement | nu
     onDismissResetSession,
     waConnected,
     groupsLoading,
+    groupsError,
   } = vm;
 
   if (!canUseApiRoutes) {
@@ -195,6 +196,9 @@ export function WhatsAppSection({ vm }: WhatsAppSectionProps): ReactElement | nu
               {emptyWhileConnected && groupsLoading ? "Loading groups…" : "Refresh groups"}
             </Button>
           </div>
+          {groupsError !== null && groups.length === 0 ? (
+            <p className="mt-3 text-xs text-amber-700">{groupsError}</p>
+          ) : null}
         </CardContent>
       </Card>
     );

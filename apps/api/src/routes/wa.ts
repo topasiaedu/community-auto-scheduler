@@ -56,8 +56,16 @@ export function registerWaRoutes(app: FastifyInstance, waPool: WaConnectionPool)
     const forceRefresh = query?.refresh === "1" || query?.refresh === "true";
     const wa = waPool.getManager(projectId);
     await wa.start();
-    const groups = await wa.fetchGroupOptions(forceRefresh);
-    return { groups };
+    try {
+      const groups = await wa.fetchGroupOptions(forceRefresh);
+      return { groups };
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Failed to fetch groups";
+      console.error(`[wa/groups] projectId=${projectId}:`, err);
+      // 503 tells the client groups are temporarily unavailable (sync in progress / IPC timeout).
+      return reply.code(503).send({ groups: [] as unknown[], error: message });
+    }
   });
 
   app.post("/wa/session/reset", async (req: FastifyRequest, reply: FastifyReply) => {

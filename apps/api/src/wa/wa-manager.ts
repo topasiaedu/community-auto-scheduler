@@ -236,6 +236,13 @@ export class WaManager {
   private startWorkInFlight: boolean = false;
 
   /**
+   * Optional hook injected by `WaConnectionPool`.
+   * Called just before QR pairing opens so the pool can evict other warm clients,
+   * freeing RAM on memory-constrained hosts (e.g. 512 MB DigitalOcean droplet).
+   */
+  private readonly onBeforeQrPairing: (() => Promise<void>) | undefined;
+
+  /**
    * True only after `logged_out` so we cancel reconnect timers for operator relinking.
    * Cleared on `start()` so a fresh boot can re-enter connecting flow.
    */
@@ -254,7 +261,12 @@ export class WaManager {
   private static readonly RECONNECT_BASE_MS = 1_000;
   private static readonly RECONNECT_CAP_MS = 60_000;
 
-  constructor(env: ApiEnv, prisma: PrismaClient, projectId: string) {
+  constructor(
+    env: ApiEnv,
+    prisma: PrismaClient,
+    projectId: string,
+    onBeforeQrPairing?: () => Promise<void>,
+  ) {
     const trimmed = projectId.trim();
     if (trimmed.length === 0) {
       throw new Error("WaManager requires a non-empty projectId");
@@ -262,6 +274,7 @@ export class WaManager {
     this.env = env;
     this.prisma = prisma;
     this.projectId = trimmed;
+    this.onBeforeQrPairing = onBeforeQrPairing;
   }
 
   getUiState(): WaConnectionUiState {
@@ -417,7 +430,19 @@ export class WaManager {
     }
     try {
       const startedAt = Date.now();
-      const groups = await client.getJoinedGroups();
+      /** Cap the Go IPC call to 25 s so the HTTP request is never open for 2 minutes. */
+      const getGroupsWithTimeout = (): Promise<Awaited<ReturnType<typeof client.getJoinedGroups>>> => {
+        const timeoutMs = 25_000;
+        return Promise.race([
+          client.getJoinedGroups(),
+          new Promise<never>((_, reject) => {
+            setTimeout(() => {
+              reject(new Error(`getJoinedGroups timed out after ${String(timeoutMs)}ms — WhatsApp sync may still be in progress`));
+            }, timeoutMs);
+          }),
+        ]);
+      };
+      const groups = await getGroupsWithTimeout();
       console.info(
         `[WaManager] getJoinedGroups projectId=${this.projectId} count=${String(groups.length)} elapsedMs=${String(Date.now() - startedAt)}`,
       );
@@ -446,8 +471,11 @@ export class WaManager {
         `[WaManager] group picker projectId=${this.projectId} options=${String(out.length)} communities=${String(parentJids.size)} elapsedMs=${String(Date.now() - startedAt)}`,
       );
       return out;
-    } catch {
-      return [];
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(`[WaManager] fetchGroupOptionsUncached failed projectId=${this.projectId}: ${message}`);
+      // Re-throw so the HTTP route can respond with 503 instead of silently returning an empty list.
+      throw err;
     }
   }
 
@@ -1299,12 +1327,18 @@ export class WaManager {
       this.attachClientEvents(fresh);
       this.client = fresh;
       await fresh.init();
+      if (this.onBeforeQrPairing !== undefined) {
+        await this.onBeforeQrPairing();
+      }
       this.markQrPairingActive();
       await fresh.getQRChannel();
       await fresh.connect();
       return;
     }
 
+    if (this.onBeforeQrPairing !== undefined) {
+      await this.onBeforeQrPairing();
+    }
     this.markQrPairingActive();
     await client.getQRChannel();
     await client.connect();

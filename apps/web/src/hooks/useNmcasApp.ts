@@ -61,6 +61,13 @@ export function useNmcasApp() {
   const [groups, setGroups] = useState<WaGroup[]>([]);
   /** True while a groups fetch is in flight (or connected with empty list still auto-retrying). */
   const [groupsLoading, setGroupsLoading] = useState(false);
+  /** Human-readable error when group sync is delayed. Cleared when groups load successfully. */
+  const [groupsError, setGroupsError] = useState<string | null>(null);
+  /**
+   * Monotonic counter incremented on every `refreshGroups` call.
+   * Responses from older requests are discarded so stale fetches can't flip loading state.
+   */
+  const groupsFetchGenerationRef = useRef(0);
   const [messages, setMessages] = useState<ScheduledMessage[]>([]);
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -365,16 +372,53 @@ export function useNmcasApp() {
         return;
       }
       const path = forceRefresh ? "/wa/groups?refresh=1" : "/wa/groups";
+
+      /** Increment generation so any in-flight response with an older generation is ignored. */
+      const generation = groupsFetchGenerationRef.current + 1;
+      groupsFetchGenerationRef.current = generation;
       setGroupsLoading(true);
-      void authorizedFetch(path)
-        .then((r) => r.json() as Promise<{ groups: WaGroup[] }>)
+
+      const controller = new AbortController();
+      /** 30 s client-side fence: the API caps at 25 s; this catches network hangs too. */
+      const timeoutId = window.setTimeout(() => {
+        controller.abort();
+      }, 30_000);
+
+      void authorizedFetch(path, { signal: controller.signal })
+        .then(async (r) => {
+          if (!r.ok) {
+            throw new Error(`Groups request failed (${String(r.status)})`);
+          }
+          return (await r.json()) as { groups?: WaGroup[]; error?: string };
+        })
         .then((j) => {
-          setGroups(dedupeWaGroupsByJid(j.groups.map((row) => normalizeWaGroupRow(row))));
+          if (groupsFetchGenerationRef.current !== generation) {
+            return;
+          }
+          const rows = Array.isArray(j.groups) ? j.groups : [];
+          if (rows.length > 0) {
+            setGroups(dedupeWaGroupsByJid(rows.map((row) => normalizeWaGroupRow(row))));
+            setGroupsError(null);
+          } else if (typeof j.error === "string") {
+            setGroupsError("Groups still syncing — wait a moment and tap Refresh groups");
+          }
           setGroupsLoading(false);
         })
-        .catch(() => {
+        .catch((err: unknown) => {
+          if (groupsFetchGenerationRef.current !== generation) {
+            return;
+          }
+          const isAbort = err instanceof DOMException && err.name === "AbortError";
+          setGroupsError(
+            isAbort
+              ? "Groups request timed out — WhatsApp may still be syncing"
+              : "Could not load groups — tap Refresh groups to retry",
+          );
           setGroups([]);
           setGroupsLoading(false);
+        })
+        .finally(() => {
+          window.clearTimeout(timeoutId);
         });
     },
     [authorizedFetch, selectedProjectId],
@@ -537,6 +581,7 @@ export function useNmcasApp() {
     } else {
       setGroups([]);
       setGroupsLoading(false);
+      setGroupsError(null);
     }
   }, [waState?.state, refreshGroups]);
 
@@ -551,6 +596,7 @@ export function useNmcasApp() {
   /**
    * While connected with an empty catalog, auto-retry a few times so Schedule destinations
    * populate without requiring a WhatsApp "Load groups" click (cold cache / race after connect).
+   * Retries are skipped while a fetch is already in flight to avoid stacking requests.
    */
   useEffect(() => {
     if (userId === null || selectedProjectId.length === 0 || waState?.state !== "connected") {
@@ -561,8 +607,12 @@ export function useNmcasApp() {
     }
     let attempts = 0;
     const maxAttempts = 6;
-    const retryMs = 5_000;
+    const retryMs = 8_000;
     const t = window.setInterval(() => {
+      /** Skip this tick when a fetch is already running to avoid stacked requests. */
+      if (groupsLoading) {
+        return;
+      }
       attempts += 1;
       refreshGroups(true);
       if (attempts >= maxAttempts) {
@@ -570,7 +620,7 @@ export function useNmcasApp() {
       }
     }, retryMs);
     return () => window.clearInterval(t);
-  }, [userId, selectedProjectId, waState?.state, groups.length, refreshGroups]);
+  }, [userId, selectedProjectId, waState?.state, groups.length, groupsLoading, refreshGroups]);
 
   useEffect(() => {
     refreshMessages();
@@ -1046,6 +1096,7 @@ export function useNmcasApp() {
     qrPayload,
     groups,
     groupsLoading,
+    groupsError,
     messages,
     formError,
     submitting,

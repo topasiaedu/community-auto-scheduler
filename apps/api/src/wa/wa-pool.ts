@@ -57,7 +57,15 @@ export class WaConnectionPool {
     }
     let manager = this.managers.get(trimmed);
     if (manager === undefined) {
-      manager = new WaManager(this.env, this.prisma, trimmed);
+      manager = new WaManager(
+        this.env,
+        this.prisma,
+        trimmed,
+        /** Evict other warm clients just before QR pairing starts to free RAM on small hosts. */
+        async () => {
+          await this.prepareForQrPairing(trimmed);
+        },
+      );
       this.managers.set(trimmed, manager);
     }
     manager.touchActivity();

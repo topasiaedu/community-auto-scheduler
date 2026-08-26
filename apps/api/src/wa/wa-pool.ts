@@ -192,7 +192,10 @@ export class WaConnectionPool {
 
     const candidates = [...this.managers.entries()]
       .filter(
-        ([id, manager]) => !this.pinnedProjectIds.has(id) && !manager.isQrLinkInProgress(),
+        ([id, manager]) =>
+          id !== keepProjectId &&
+          !this.pinnedProjectIds.has(id) &&
+          !manager.isQrLinkInProgress(),
       )
       .sort((a, b) => a[1].getLastActivityAtMs() - b[1].getLastActivityAtMs());
 
@@ -209,22 +212,38 @@ export class WaConnectionPool {
   /**
    * Frees RAM before QR pairing on small hosts: shut down every other warm client,
    * then mark the target project as mid-pairing so it is not evicted.
+   * Pairing is marked first so `/wa/status` shows progress while others shut down.
+   * Each peer shutdown is capped so one stuck Go process cannot block QR forever.
    */
   async prepareForQrPairing(projectId: string): Promise<void> {
     const keep = projectId.trim();
     if (keep.length === 0) {
       throw new Error("projectId must be non-empty");
     }
+    const target = this.getManager(keep);
+    target.markQrPairingActive();
+
     for (const [id, manager] of [...this.managers.entries()]) {
       if (id === keep) {
         continue;
       }
       console.info(`[wa-pool] freeing RAM for QR pairing; shutting down projectId=${id}`);
-      await manager.shutdown();
+      try {
+        await Promise.race([
+          manager.shutdown(),
+          new Promise<void>((_, reject) => {
+            setTimeout(() => {
+              reject(new Error(`shutdown timed out for projectId=${id}`));
+            }, 12_000);
+          }),
+        ]);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.warn(`[wa-pool] peer shutdown during QR prep failed projectId=${id}: ${message}`);
+      }
       this.managers.delete(id);
       this.pinnedProjectIds.delete(id);
     }
-    const target = this.getManager(keep);
     target.markQrPairingActive();
   }
 

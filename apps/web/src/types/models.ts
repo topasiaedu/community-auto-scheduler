@@ -21,6 +21,8 @@ export type WaStatusResponse = {
   hasClient?: boolean;
   startWorkInFlight?: boolean;
   lastError?: string | null;
+  /** Where boot is currently blocked (e.g. `init`, `qr_channel`) — null when idle. */
+  bootPhase?: string | null;
 };
 
 export type WaGroup = {

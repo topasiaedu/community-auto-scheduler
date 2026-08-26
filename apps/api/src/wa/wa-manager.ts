@@ -227,6 +227,12 @@ export class WaManager {
   /** Last operator-visible WA error (exit, QR timeout, boot failure). */
   private lastError: string | undefined;
 
+  /**
+   * Short label for where `boot()` / `ensureRunning()` is currently blocked.
+   * Surfaced in `/wa/status` so operators can see hangs without server SSH.
+   */
+  private bootPhase: string | undefined;
+
   private isShuttingDown: boolean = false;
 
   /**
@@ -296,6 +302,7 @@ export class WaManager {
     hasClient: boolean;
     startWorkInFlight: boolean;
     lastError: string | null;
+    bootPhase: string | null;
   } {
     const hasQr = this.latestQr !== undefined;
     return {
@@ -305,6 +312,7 @@ export class WaManager {
       hasClient: this.client !== undefined,
       startWorkInFlight: this.startWorkInFlight,
       lastError: this.lastError ?? null,
+      bootPhase: this.bootPhase ?? null,
     };
   }
 
@@ -370,6 +378,7 @@ export class WaManager {
       .catch((err: unknown) => {
         this.startWorkInFlight = false;
         this.qrPairingActive = false;
+        this.bootPhase = undefined;
         const message = err instanceof Error ? err.message : String(err);
         this.lastError = message;
         console.error("[WaManager] boot chain failed:", err);
@@ -687,11 +696,13 @@ export class WaManager {
 
   /**
    * Closes the client on process shutdown (best-effort).
+   * Disconnect is capped so pool eviction cannot hang forever behind a stuck Go IPC call.
    */
   async shutdown(): Promise<void> {
     this.isShuttingDown = true;
     this.cancelReconnectTimer();
     this.stopGroupsRefreshLoop();
+    this.bootPhase = "shutdown";
     this.waOpChain = this.waOpChain
       .then(async () => {
         this.stopPersistTimer();
@@ -700,18 +711,29 @@ export class WaManager {
         this.uiState = "disconnected";
         this.latestQr = undefined;
         this.groupCache = undefined;
+        this.qrPairingActive = false;
         if (client !== undefined) {
           try {
-            await client.disconnect();
+            await withTimeout(client.disconnect(), 5_000, "disconnect during shutdown");
+          } catch {
+            /* ignore — force-close below */
+          }
+          try {
+            client.close();
           } catch {
             /* ignore */
           }
-          client.close();
           await sleep(300);
         }
-        await this.safePersist();
+        try {
+          await withTimeout(this.safePersist(), 8_000, "persist during shutdown");
+        } catch {
+          /* ignore — eviction must complete */
+        }
+        this.bootPhase = undefined;
       })
       .catch((err: unknown) => {
+        this.bootPhase = undefined;
         console.error("[WaManager] shutdown failed:", err);
       });
     await this.waOpChain;
@@ -719,8 +741,11 @@ export class WaManager {
 
   /**
    * Wipes session store and boots a fresh client (new QR).
+   * Force-closes any live client immediately so a stuck `init`/`connect` on the
+   * op chain rejects and the reset can proceed instead of waiting up to 120s.
    */
   resetSessionForLinking(): Promise<void> {
+    this.forceCloseClientForReset();
     this.waOpChain = this.waOpChain
       .then(() => this.performResetSessionForLinking())
       .catch((err: unknown) => {
@@ -728,6 +753,25 @@ export class WaManager {
         throw err;
       });
     return this.waOpChain;
+  }
+
+  /**
+   * Immediately drops the Go client so in-flight IPC (`init`, `connect`, …) fails fast.
+   */
+  private forceCloseClientForReset(): void {
+    const existing = this.client;
+    this.client = undefined;
+    this.latestQr = undefined;
+    this.bootPhase = "reset_forced_close";
+    this.lastError = undefined;
+    if (existing === undefined) {
+      return;
+    }
+    try {
+      existing.close();
+    } catch {
+      /* ignore */
+    }
   }
 
   private async performResetSessionForLinking(): Promise<void> {
@@ -764,16 +808,19 @@ export class WaManager {
         if (await existing.isConnected()) {
           this.uiState = "connected";
           this.loggedInWaitFailures = 0;
+          this.bootPhase = undefined;
           this.ensureGroupsRefreshLoop();
           return;
         }
         if (await existing.isLoggedIn()) {
           this.uiState = "connecting";
+          this.bootPhase = "reconnect_existing";
           await existing.connect();
-          const ok = await existing.waitForConnection(30_000);
+          const ok = await existing.waitForConnection(20_000);
           if (ok) {
             this.uiState = "connected";
             this.loggedInWaitFailures = 0;
+            this.bootPhase = undefined;
             this.startPersistTimer();
             this.ensureGroupsRefreshLoop();
             await this.safePersist();
@@ -866,6 +913,7 @@ export class WaManager {
       this.qrPairingActive = false;
       this.loggedInWaitFailures = 0;
       this.lastError = undefined;
+      this.bootPhase = undefined;
       this.startPersistTimer();
       this.ensureGroupsRefreshLoop();
       // Connection succeeded; reset reconnect backoff.
@@ -1279,10 +1327,12 @@ export class WaManager {
     this.stopPersistTimer();
     this.stopGroupsRefreshLoop();
     this.latestQr = undefined;
+    this.bootPhase = "hydrate";
 
     await hydrateWhatsAppSessionFromBlob(this.prisma, this.env, this.projectId);
 
     const store = resolveWhatsAppStoreUri(this.env, this.projectId);
+    this.bootPhase = "create_client";
     const client = createClient({
       store,
       commandTimeout: WHATSAPP_COMMAND_TIMEOUT_MS,
@@ -1290,12 +1340,15 @@ export class WaManager {
     this.attachClientEvents(client);
     this.client = client;
 
-    const initResult = await client.init();
+    this.bootPhase = "init";
+    /** Cap init so a hung Go subprocess cannot block QR pairing for the full 120s IPC timeout. */
+    const initResult = await withTimeout(client.init(), 40_000, "client.init");
     const afterInit = planPairingAfterInit(initResult.jid);
 
     if (afterInit === "connect_stored_session") {
+      this.bootPhase = "reconnect_stored";
       await client.connect();
-      const connectedOk = await client.waitForConnection(30_000);
+      const connectedOk = await client.waitForConnection(20_000);
       const loggedIn = connectedOk ? await this.safeIsLoggedIn(client) : false;
       console.info(
         `[WaManager] boot projectId=${this.projectId} storedSession=true connected=${String(connectedOk)} loggedIn=${String(loggedIn)}`,
@@ -1303,6 +1356,7 @@ export class WaManager {
       if (loggedIn) {
         this.uiState = "connected";
         this.loggedInWaitFailures = 0;
+        this.bootPhase = undefined;
         this.startPersistTimer();
         this.ensureGroupsRefreshLoop();
         await this.safePersist();
@@ -1314,6 +1368,7 @@ export class WaManager {
       console.warn(
         `[WaManager] stored session unusable projectId=${this.projectId}; plan=${deadPlan}`,
       );
+      this.bootPhase = "wipe_dead_session";
       await this.disposeClientQuietly(client);
       this.client = undefined;
       await wipeWhatsAppStore(this.prisma, this.env, this.projectId);
@@ -1326,22 +1381,31 @@ export class WaManager {
       });
       this.attachClientEvents(fresh);
       this.client = fresh;
-      await fresh.init();
-      if (this.onBeforeQrPairing !== undefined) {
-        await this.onBeforeQrPairing();
-      }
-      this.markQrPairingActive();
-      await fresh.getQRChannel();
-      await fresh.connect();
+      this.bootPhase = "init_fresh";
+      await withTimeout(fresh.init(), 40_000, "fresh.client.init");
+      await this.beginQrPairing(fresh);
       return;
     }
 
+    await this.beginQrPairing(client);
+  }
+
+  /**
+   * Frees RAM (via pool callback), opens the QR channel, and connects.
+   * Marks pairing active before any await so `/wa/status` shows progress.
+   */
+  private async beginQrPairing(client: WhatsmeowClient): Promise<void> {
+    this.bootPhase = "prepare_ram";
+    this.markQrPairingActive();
     if (this.onBeforeQrPairing !== undefined) {
       await this.onBeforeQrPairing();
     }
     this.markQrPairingActive();
-    await client.getQRChannel();
+    this.bootPhase = "qr_channel";
+    await withTimeout(client.getQRChannel(), 30_000, "getQRChannel");
+    this.bootPhase = "qr_connect";
     await client.connect();
+    this.bootPhase = "awaiting_scan";
   }
 
   private startPersistTimer(): void {
@@ -1441,5 +1505,26 @@ export class WaManager {
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
+  });
+}
+
+/**
+ * Rejects if `promise` does not settle within `ms`.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${String(ms)}ms`));
+    }, ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err: unknown) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
   });
 }

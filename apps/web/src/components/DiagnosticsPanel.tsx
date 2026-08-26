@@ -49,6 +49,7 @@ export function DiagnosticsPanel({ vm }: DiagnosticsPanelProps): ReactElement | 
                 hasClient: waState.hasClient ?? null,
                 startWorkInFlight: waState.startWorkInFlight ?? null,
                 lastError: waState.lastError ?? null,
+                bootPhase: waState.bootPhase ?? null,
               })}
             </code>
           )}

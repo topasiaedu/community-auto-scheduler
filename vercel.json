@@ -4,5 +4,8 @@
   "buildCommand": "npm run build:web && sh -c 'if [ -d apps/web/dist ]; then rm -rf dist && mkdir -p dist && cp -r apps/web/dist/. dist/; elif [ -f dist/index.html ]; then :; else echo Build failed: dist not found && exit 1; fi'",
   "outputDirectory": "dist",
   "framework": null,
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }],
+  "git": {
+    "deploymentEnabled": false
+  }
 }

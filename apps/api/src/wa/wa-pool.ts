@@ -199,6 +199,28 @@ export class WaConnectionPool {
   }
 
   /**
+   * Frees RAM before QR pairing on small hosts: shut down every other warm client,
+   * then mark the target project as mid-pairing so it is not evicted.
+   */
+  async prepareForQrPairing(projectId: string): Promise<void> {
+    const keep = projectId.trim();
+    if (keep.length === 0) {
+      throw new Error("projectId must be non-empty");
+    }
+    for (const [id, manager] of [...this.managers.entries()]) {
+      if (id === keep) {
+        continue;
+      }
+      console.info(`[wa-pool] freeing RAM for QR pairing; shutting down projectId=${id}`);
+      await manager.shutdown();
+      this.managers.delete(id);
+      this.pinnedProjectIds.delete(id);
+    }
+    const target = this.getManager(keep);
+    target.markQrPairingActive();
+  }
+
+  /**
    * Shuts down managers that have been idle and are not mid-QR linking.
    */
   private async sweepIdleManagers(): Promise<void> {

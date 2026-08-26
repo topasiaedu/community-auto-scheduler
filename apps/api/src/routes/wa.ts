@@ -23,8 +23,8 @@ export function registerWaRoutes(app: FastifyInstance, waPool: WaConnectionPool)
     const wa = waPool.getManager(projectId);
     const snap = wa.getStatusSnapshot();
     // Keep this endpoint cheap: never await a cold boot/persist on the request path.
-    // If we're truly idle, start in the background and return the updated snapshot.
-    if (snap.state === "disconnected" && snap.hasQr === false) {
+    // Re-kick when not connected and no QR — but skip if a boot is already running.
+    if (snap.state !== "connected" && snap.hasQr === false && !wa.isStartWorkInFlight()) {
       void wa.start();
       return wa.getStatusSnapshot();
     }
@@ -39,8 +39,7 @@ export function registerWaRoutes(app: FastifyInstance, waPool: WaConnectionPool)
     const wa = waPool.getManager(projectId);
     const qr = wa.getLatestQr();
     if (qr === undefined) {
-      // Start only if we're idle; do not block this request on cold boot.
-      if (wa.getUiState() === "disconnected") {
+      if (wa.getUiState() !== "connected" && !wa.isStartWorkInFlight()) {
         void wa.start();
       }
       return reply.code(204).send();
@@ -68,6 +67,8 @@ export function registerWaRoutes(app: FastifyInstance, waPool: WaConnectionPool)
     }
     const wa = waPool.getManager(projectId);
     try {
+      // On 512 MB hosts, three warm Go clients can prevent QR connect from completing.
+      await waPool.prepareForQrPairing(projectId);
       await wa.resetSessionForLinking();
       return { ok: true as const };
     } catch (err) {

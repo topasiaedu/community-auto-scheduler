@@ -93,6 +93,11 @@ export function WhatsAppSection({ vm }: WhatsAppSectionProps): ReactElement | nu
               {waConnecting ? (
                 <p className="text-xs text-muted-foreground">Status may flicker briefly after scanning — that's normal.</p>
               ) : null}
+              {typeof waState?.lastError === "string" && waState.lastError.length > 0 ? (
+                <Alert variant="destructive">
+                  <AlertDescription>{waState.lastError}</AlertDescription>
+                </Alert>
+              ) : null}
               <Button onClick={() => void refreshWa()} className="mt-1">
                 {waConnecting ? "Checking status…" : "Refresh status"}
               </Button>
@@ -139,8 +144,19 @@ export function WhatsAppSection({ vm }: WhatsAppSectionProps): ReactElement | nu
                   </figcaption>
                 </figure>
               ) : (
-                <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border bg-muted/30 p-8 min-h-[220px] min-w-[220px]">
-                  <span className="text-sm text-muted-foreground">Generating QR…</span>
+                <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border bg-muted/30 p-8 min-h-[220px] min-w-[220px] text-center">
+                  <span className="text-sm text-muted-foreground">
+                    {waState?.hasQr === true
+                      ? "Generating QR…"
+                      : waConnecting
+                        ? "Waiting for WhatsApp…"
+                        : "QR not ready yet"}
+                  </span>
+                  {waState?.hasQr !== true ? (
+                    <p className="text-xs text-muted-foreground max-w-[200px]">
+                      If this lasts more than ~30 seconds, use Clear session below, then Refresh QR.
+                    </p>
+                  ) : null}
                   <Button variant="outline" size="sm" onClick={() => void refreshQrFromServer()}>
                     Refresh QR
                   </Button>

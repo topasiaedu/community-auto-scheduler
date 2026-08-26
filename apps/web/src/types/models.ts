@@ -16,6 +16,11 @@ export type HealthResponse = {
 export type WaStatusResponse = {
   state: "disconnected" | "connecting" | "connected";
   hasQr: boolean;
+  /** True while the API is in a QR pairing attempt (including before the first QR event). */
+  pairing?: boolean;
+  hasClient?: boolean;
+  startWorkInFlight?: boolean;
+  lastError?: string | null;
 };
 
 export type WaGroup = {

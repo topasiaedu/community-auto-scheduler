@@ -10,7 +10,7 @@ type DiagnosticsPanelProps = {
 };
 
 export function DiagnosticsPanel({ vm }: DiagnosticsPanelProps): ReactElement | null {
-  const { session, health, refreshHealth } = vm;
+  const { session, health, refreshHealth, waState } = vm;
 
   if (session === null) {
     return null;
@@ -36,6 +36,23 @@ export function DiagnosticsPanel({ vm }: DiagnosticsPanelProps): ReactElement | 
             </p>
           </>
         )}
+        <p>
+          <strong>WhatsApp status:</strong>{" "}
+          {waState === null ? (
+            <span>unavailable</span>
+          ) : (
+            <code>
+              {JSON.stringify({
+                state: waState.state,
+                hasQr: waState.hasQr,
+                pairing: waState.pairing ?? null,
+                hasClient: waState.hasClient ?? null,
+                startWorkInFlight: waState.startWorkInFlight ?? null,
+                lastError: waState.lastError ?? null,
+              })}
+            </code>
+          )}
+        </p>
         <p className="btn-row">
           <button type="button" className="btn btn--ghost" onClick={() => void refreshHealth()}>
             Refresh health

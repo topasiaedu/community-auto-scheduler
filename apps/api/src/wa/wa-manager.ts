@@ -31,6 +31,11 @@ import {
 import { parseActiveCommunityJids } from "../lib/valueFanOut.js";
 import { sendGroupImage, sendGroupPoll, sendGroupSticker, sendGroupText, withTempImageFile } from "./wa-send.js";
 import {
+  planPairingAfterDeadStoredSession,
+  planPairingAfterInit,
+  planPairingAfterLoggedInWaitFailed,
+} from "../lib/waQrPairing.js";
+import {
   hydrateWhatsAppSessionFromBlob,
   persistWhatsAppSessionToBlob,
   resolveWhatsAppStoreUri,
@@ -207,7 +212,28 @@ export class WaManager {
   /** Exponential reconnect backoff (server-owned supervised reconnect). */
   private reconnectBackoffMs: number = 1_000;
 
+  /**
+   * Consecutive `isLoggedIn` + `waitForConnection` failures.
+   * After the threshold we wipe and open a fresh QR so the UI is not stuck forever.
+   */
+  private loggedInWaitFailures: number = 0;
+
+  /**
+   * True from the moment we open a QR pairing channel until connected / abandoned.
+   * Broader than `latestQr` — protects the pre-QR window from pool eviction.
+   */
+  private qrPairingActive: boolean = false;
+
+  /** Last operator-visible WA error (exit, QR timeout, boot failure). */
+  private lastError: string | undefined;
+
   private isShuttingDown: boolean = false;
+
+  /**
+   * True while `ensureRunning`/`boot` from `start()` is on the op chain.
+   * Lets HTTP status avoid stacking duplicate boots on every poll.
+   */
+  private startWorkInFlight: boolean = false;
 
   /**
    * True only after `logged_out` so we cancel reconnect timers for operator relinking.
@@ -250,9 +276,23 @@ export class WaManager {
    * Cheap in-memory snapshot for HTTP status endpoints.
    * Avoids awaiting cold boot/persist on request paths.
    */
-  getStatusSnapshot(): { state: WaConnectionUiState; hasQr: boolean } {
+  getStatusSnapshot(): {
+    state: WaConnectionUiState;
+    hasQr: boolean;
+    pairing: boolean;
+    hasClient: boolean;
+    startWorkInFlight: boolean;
+    lastError: string | null;
+  } {
     const hasQr = this.latestQr !== undefined;
-    return { state: hasQr ? "connecting" : this.uiState, hasQr };
+    return {
+      state: hasQr ? "connecting" : this.uiState,
+      hasQr,
+      pairing: this.qrPairingActive,
+      hasClient: this.client !== undefined,
+      startWorkInFlight: this.startWorkInFlight,
+      lastError: this.lastError ?? null,
+    };
   }
 
   /** Epoch ms of the last start/send/status touch (for idle eviction). */
@@ -266,10 +306,28 @@ export class WaManager {
   }
 
   /**
-   * True while a QR is on screen — pool must not idle-evict mid-scan.
+   * True while QR pairing is active (including the pre-first-QR window) — pool must not evict.
    */
   isQrLinkInProgress(): boolean {
-    return this.getLatestQr() !== undefined;
+    return this.qrPairingActive || this.getLatestQr() !== undefined;
+  }
+
+  /**
+   * True while `start()` → ensureRunning/boot is actively running on the op chain.
+   */
+  isStartWorkInFlight(): boolean {
+    return this.startWorkInFlight;
+  }
+
+  /** Marks this manager as mid QR-link so the pool will not shut it down for RAM. */
+  markQrPairingActive(): void {
+    this.qrPairingActive = true;
+    this.lastError = undefined;
+  }
+
+  /** Clears the QR-pairing guard (connected, abandoned, or logged out). */
+  clearQrPairingActive(): void {
+    this.qrPairingActive = false;
   }
 
   /**
@@ -288,8 +346,19 @@ export class WaManager {
       this.uiState = "connecting";
     }
     this.waOpChain = this.waOpChain
-      .then(() => this.ensureRunning())
+      .then(async () => {
+        this.startWorkInFlight = true;
+        try {
+          await this.ensureRunning();
+        } finally {
+          this.startWorkInFlight = false;
+        }
+      })
       .catch((err: unknown) => {
+        this.startWorkInFlight = false;
+        this.qrPairingActive = false;
+        const message = err instanceof Error ? err.message : String(err);
+        this.lastError = message;
         console.error("[WaManager] boot chain failed:", err);
         this.uiState = "disconnected";
       });
@@ -666,6 +735,7 @@ export class WaManager {
       try {
         if (await existing.isConnected()) {
           this.uiState = "connected";
+          this.loggedInWaitFailures = 0;
           this.ensureGroupsRefreshLoop();
           return;
         }
@@ -673,39 +743,101 @@ export class WaManager {
           this.uiState = "connecting";
           await existing.connect();
           const ok = await existing.waitForConnection(30_000);
-          this.uiState = ok ? "connected" : "connecting";
           if (ok) {
+            this.uiState = "connected";
+            this.loggedInWaitFailures = 0;
             this.startPersistTimer();
             this.ensureGroupsRefreshLoop();
             await this.safePersist();
+            return;
           }
+          this.loggedInWaitFailures += 1;
+          const plan = planPairingAfterLoggedInWaitFailed(this.loggedInWaitFailures);
+          console.warn(
+            `[WaManager] logged-in wait failed projectId=${this.projectId} failures=${String(this.loggedInWaitFailures)} plan=${plan}`,
+          );
+          if (plan === "schedule_reconnect") {
+            this.uiState = "connecting";
+            this.scheduleReconnect("wait_for_connection_failed");
+            return;
+          }
+          // Fall through: dispose + wipe + fresh QR pairing via boot().
+          await this.disposeClientQuietly(existing);
+          this.client = undefined;
+          this.latestQr = undefined;
+          this.loggedInWaitFailures = 0;
+          await wipeWhatsAppStore(this.prisma, this.env, this.projectId);
+          await this.boot();
           return;
         }
       } catch {
         /* tear down and full boot */
       }
-      try {
-        await existing.disconnect();
-      } catch {
-        /* ignore */
-      }
-      existing.close();
+      await this.disposeClientQuietly(existing);
       this.client = undefined;
     }
     await this.boot();
+  }
+
+  /**
+   * Best-effort disconnect + close so a wiped store is never paired with a live Go process.
+   */
+  private async disposeClientQuietly(client: WhatsmeowClient): Promise<void> {
+    try {
+      await client.disconnect();
+    } catch {
+      /* ignore */
+    }
+    try {
+      await client.logout();
+    } catch {
+      /* may already be logged out / never paired */
+    }
+    try {
+      client.close();
+    } catch {
+      /* ignore */
+    }
+    await sleep(300);
   }
 
   private attachClientEvents(client: WhatsmeowClient): void {
     client.on("qr", ({ code }) => {
       this.latestQr = code;
       this.uiState = "connecting";
+      this.qrPairingActive = true;
+      this.lastError = undefined;
       // QR linking is the operator flow; reconnect backoff is not relevant.
       this.cancelReconnectTimer();
+    });
+
+    client.on("qr:timeout", () => {
+      this.latestQr = undefined;
+      this.qrPairingActive = false;
+      this.lastError = "QR channel timed out — tap Clear session or Refresh QR";
+      console.warn(`[WaManager] QR channel timed out projectId=${this.projectId}`);
+      // Allow the next status/QR poll to re-kick start() → fresh pairing.
+      if (this.uiState !== "connected") {
+        this.uiState = "disconnected";
+      }
+    });
+
+    client.on("qr:error", (payload) => {
+      this.latestQr = undefined;
+      this.qrPairingActive = false;
+      this.lastError = `QR error: ${payload.event}`;
+      console.error(`[WaManager] QR error projectId=${this.projectId} event=${payload.event}`);
+      if (this.uiState !== "connected") {
+        this.uiState = "disconnected";
+      }
     });
 
     client.on("connected", () => {
       this.uiState = "connected";
       this.latestQr = undefined;
+      this.qrPairingActive = false;
+      this.loggedInWaitFailures = 0;
+      this.lastError = undefined;
       this.startPersistTimer();
       this.ensureGroupsRefreshLoop();
       // Connection succeeded; reset reconnect backoff.
@@ -731,6 +863,8 @@ export class WaManager {
       this.isLoggedOut = true;
       this.uiState = "disconnected";
       this.latestQr = undefined;
+      this.qrPairingActive = false;
+      this.lastError = "WhatsApp logged out — scan a new QR";
       this.cancelReconnectTimer();
       this.stopPersistTimer();
       this.stopGroupsRefreshLoop();
@@ -740,6 +874,7 @@ export class WaManager {
     });
 
     client.on("error", (err: Error) => {
+      this.lastError = err.message;
       console.error(`[WaManager] client error projectId=${this.projectId}:`, err.message);
     });
 
@@ -747,9 +882,20 @@ export class WaManager {
       if (code !== null && code !== 0) {
         console.error(`[WaManager] Go subprocess exited projectId=${this.projectId} code=${String(code)}`);
         this.uiState = "disconnected";
+        this.qrPairingActive = false;
+        this.latestQr = undefined;
+        this.client = undefined;
+        this.lastError = `WhatsApp engine exited (code ${String(code)})`;
         this.stopGroupsRefreshLoop();
         this.scheduleReconnect(`exit_code_${String(code)}`);
       }
+    });
+
+    client.on("temporary_ban", (payload) => {
+      this.lastError = `temporary_ban code=${payload.code} expire=${payload.expire}`;
+      console.error(
+        `[WaManager] temporary_ban projectId=${this.projectId} code=${payload.code} expire=${payload.expire}`,
+      );
     });
 
     /**
@@ -1104,6 +1250,7 @@ export class WaManager {
     this.uiState = "connecting";
     this.stopPersistTimer();
     this.stopGroupsRefreshLoop();
+    this.latestQr = undefined;
 
     await hydrateWhatsAppSessionFromBlob(this.prisma, this.env, this.projectId);
 
@@ -1116,8 +1263,9 @@ export class WaManager {
     this.client = client;
 
     const initResult = await client.init();
-    const hasStoredSession = initResult.jid !== undefined && initResult.jid.length > 0;
-    if (hasStoredSession) {
+    const afterInit = planPairingAfterInit(initResult.jid);
+
+    if (afterInit === "connect_stored_session") {
       await client.connect();
       const connectedOk = await client.waitForConnection(30_000);
       const loggedIn = connectedOk ? await this.safeIsLoggedIn(client) : false;
@@ -1126,27 +1274,38 @@ export class WaManager {
       );
       if (loggedIn) {
         this.uiState = "connected";
+        this.loggedInWaitFailures = 0;
         this.startPersistTimer();
         this.ensureGroupsRefreshLoop();
         await this.safePersist();
         return;
       }
+
+      // Dead / revoked session: must recreate the Go client after wipe (see waQrPairing).
+      const deadPlan = planPairingAfterDeadStoredSession();
       console.warn(
-        `[WaManager] stored session is not logged in projectId=${this.projectId}; re-linking via QR`,
+        `[WaManager] stored session unusable projectId=${this.projectId}; plan=${deadPlan}`,
       );
-      try {
-        await client.logout();
-      } catch {
-        /* may already be logged out */
-      }
-      try {
-        await client.disconnect();
-      } catch {
-        /* ignore */
-      }
+      await this.disposeClientQuietly(client);
+      this.client = undefined;
       await wipeWhatsAppStore(this.prisma, this.env, this.projectId);
+
+      await hydrateWhatsAppSessionFromBlob(this.prisma, this.env, this.projectId);
+      const freshStore = resolveWhatsAppStoreUri(this.env, this.projectId);
+      const fresh = createClient({
+        store: freshStore,
+        commandTimeout: WHATSAPP_COMMAND_TIMEOUT_MS,
+      });
+      this.attachClientEvents(fresh);
+      this.client = fresh;
+      await fresh.init();
+      this.markQrPairingActive();
+      await fresh.getQRChannel();
+      await fresh.connect();
+      return;
     }
 
+    this.markQrPairingActive();
     await client.getQRChannel();
     await client.connect();
   }

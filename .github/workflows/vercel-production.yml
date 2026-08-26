@@ -1,0 +1,60 @@
+# Production deploy for pushes to main.
+# Authenticates with the company/owner Vercel token rather than the Git commit author,
+# which avoids private-repo commit-author membership checks on native Git deploys.
+name: Vercel Production
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+# Cancel an in-flight production deploy if a newer commit lands on main.
+concurrency:
+  group: vercel-production
+  cancel-in-progress: true
+
+env:
+  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+jobs:
+  deploy-production:
+    name: Deploy production
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    steps:
+      # Fetch the repository at the pushed commit.
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # Pin the CLI so a Vercel release cannot break deploys without warning.
+      - name: Install Vercel CLI
+        run: npm install --global vercel@59.5.0
+
+      # Download production environment variables and project settings (includes VITE_*).
+      - name: Pull production environment
+        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+
+      # Build on the runner; output lands in .vercel/output.
+      - name: Build production
+        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+
+      # Upload the prebuilt output. "--prebuilt" prevents a second build on Vercel.
+      - name: Deploy production
+        id: deploy
+        run: |
+          url="$(vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }})"
+          echo "url=${url}" >> "${GITHUB_OUTPUT}"
+          echo "Production URL: ${url}"
+
+      - name: Report production URL
+        run: echo "Deployed to ${{ steps.deploy.outputs.url }}"

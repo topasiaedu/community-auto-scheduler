@@ -72,7 +72,16 @@ Use a real `.env` with `DATABASE_URL` and other vars; `PORT` in the container sh
 3. **Framework preset:** Other, or let `vercel.json` drive the build.
 4. **Install command:** `npm ci`
 5. **Build command:** `npm run build:web`
-6. **Output directory:** `apps/web/dist`
+6. **Output directory:** `apps/web/dist` (root `vercel.json` copies into `dist` for the Vercel output directory).
+
+### Auto-deploy via GitHub Actions (private repo)
+
+Workflows are ready:
+
+- `.github/workflows/vercel-production.yml` (push to `main`)
+- `.github/workflows/vercel-preview.yml` (in-repo pull requests)
+
+Follow [`GitHub-Vercel-Private-Repo-Deploy-CHECKLIST.md`](GitHub-Vercel-Private-Repo-Deploy-CHECKLIST.md) for token, secrets, and cutover. **Only after Actions is green**, merge `"git": { "deploymentEnabled": false }` into root `vercel.json` so native Git deploys stop and Actions owns deploys.
 
 ### Vercel environment variables (Production / Preview)
 
@@ -82,7 +91,7 @@ Use a real `.env` with `DATABASE_URL` and other vars; `PORT` in the container sh
 | `VITE_SUPABASE_URL` | Same Supabase project URL as the API. |
 | `VITE_SUPABASE_ANON_KEY` | Same `anon` key as in the web app env locally. |
 
-Redeploy after changing env vars so Vite embeds them at build time.
+Redeploy after changing env vars so Vite embeds them at build time (`vercel pull` in Actions loads these from the Vercel project).
 
 ---
 

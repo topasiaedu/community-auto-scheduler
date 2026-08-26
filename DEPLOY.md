@@ -76,12 +76,12 @@ Use a real `.env` with `DATABASE_URL` and other vars; `PORT` in the container sh
 
 ### Auto-deploy via GitHub Actions (private repo)
 
-Workflows are ready:
+Native Git auto-deploy is disabled in root `vercel.json` (`git.deploymentEnabled: false`). Production and preview deploys run from:
 
 - `.github/workflows/vercel-production.yml` (push to `main`)
 - `.github/workflows/vercel-preview.yml` (in-repo pull requests)
 
-Follow [`GitHub-Vercel-Private-Repo-Deploy-CHECKLIST.md`](GitHub-Vercel-Private-Repo-Deploy-CHECKLIST.md) for token, secrets, and cutover. **Only after Actions is green**, merge `"git": { "deploymentEnabled": false }` into root `vercel.json` so native Git deploys stop and Actions owns deploys.
+Follow [`GitHub-Vercel-Private-Repo-Deploy-CHECKLIST.md`](GitHub-Vercel-Private-Repo-Deploy-CHECKLIST.md) for token, secrets, and remaining lock-down steps.
 
 ### Vercel environment variables (Production / Preview)
 

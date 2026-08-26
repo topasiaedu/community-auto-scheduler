@@ -9,8 +9,6 @@
 
 ---
 
-
-
 ## This repo (facts for NMCAS)
 
 
@@ -38,8 +36,6 @@
 
 ---
 
-
-
 ## Verification status (load-bearing claims)
 
 
@@ -51,8 +47,6 @@
 | GitHub Actions + `vercel deploy --prebuilt` is supported                       | Confirmed     | [Use GitHub Actions with Vercel](https://vercel.com/kb/guide/how-can-i-use-github-actions-with-vercel)      |
 | `git.deploymentEnabled: false` disables native Git deploys                     | Confirmed     | [Git configuration](https://vercel.com/docs/project-configuration/git-configuration)                        |
 | CLI may still inspect git author metadata (community reports since ~v44)       | Optional risk | Other TopAsia repos pass with token-only Actions; no deployer-email amend here                              |
-
-
 
 
 ### Corrections applied vs older drafts
@@ -68,8 +62,6 @@
 
 
 ---
-
-
 
 ## Phase 0 — Pre-flight (do not skip)
 
@@ -97,8 +89,6 @@ npm view vercel version
 - [ ] **0.9** **Align Vercel Root Directory (do before relying on Actions builds).** Dashboard currently shows Root Directory = `apps/web`, but this monorepo’s supported build is the **repo-root** `vercel.json` (`npm ci` + `npm run build:web` + copy to `dist`). In Vercel → Project → Settings → General → **Root Directory**, clear it to the repository root (empty / `.`), then save. Leave unchecked until you confirm in the dashboard.
 
 ---
-
-
 
 ## Phase 1 — Company / owner credentials
 
@@ -143,8 +133,6 @@ Linked: `topasiaedus-projects/community-auto-scheduler-web`.
 
 ---
 
-
-
 ## Phase 2 — GitHub secrets
 
 - [x] **2.1** Repo → **Settings → Secrets and variables → Actions**.
@@ -172,8 +160,6 @@ Linked: `topasiaedus-projects/community-auto-scheduler-web`.
 
 ---
 
-
-
 ## Phase 3 — Prove Actions (repo is already private)
 
 > Classic checklist keeps the repo public until Actions is green. **This repo is already private**, so native Git may already be the only fallback. Prove Actions carefully before relying on `deploymentEnabled: false`.
@@ -185,12 +171,12 @@ Workflow files are **already in the repo**:
 
 - [x] **3.1** Confirm both workflow files exist and pin `vercel@59.5.0`.
 - [x] **3.2** Confirm root `vercel.json` still has SPA build settings. **Do not** add `git.deploymentEnabled: false` until Phase 4 (Actions must be green first).
-- [ ] **3.3** After secrets (Phase 2) are set, open a throwaway PR from a developer account **inside** the repo (not a fork).
-- [ ] **3.4** Confirm the **Vercel Preview** Actions job is green.
-- [ ] **3.5** Confirm a preview URL was posted as a PR comment by the workflow.
-- [ ] **3.6** Open that URL and click through: sign-in, project picker, schedules, WhatsApp panel. Check browser console for CORS errors against Render (`WEB_ORIGIN` / Phase 0.8).
-- [ ] **3.7** Merge to `main` (or push a trivial commit) and confirm **Vercel Production** Actions job is green.
-- [ ] **3.8** Confirm production domain serves the new deployment.
+- [x] **3.3** After secrets (Phase 2) are set, open a throwaway PR from a developer account **inside** the repo (not a fork).
+- [x] **3.4** Confirm the **Vercel Preview** Actions job is green.
+- [x] **3.5** Confirm a preview URL was posted as a PR comment by the workflow.
+- [x] **3.6** Open that URL and click through: sign-in, project picker, schedules, WhatsApp panel. Check browser console for CORS errors against Render (`WEB_ORIGIN` / Phase 0.8).
+- [x] **3.7** Merge to `main` (or push a trivial commit) and confirm **Vercel Production** Actions job is green.
+- [x] **3.8** Confirm production domain serves the new deployment.
 
 At this stage you may see **two** deploys (native Git + Actions). That is expected until Phase 4.
 
@@ -198,35 +184,10 @@ If Actions fails, keep using native Git and fix secrets/token scope before Phase
 
 ---
 
-
-
 ## Phase 4 — Cut deployment over to Actions
 
-- [ ] **4.1** Merge this into the **existing** root `vercel.json` (keep install/build/output/rewrites):
-
-```json
-"git": {
-  "deploymentEnabled": false
-}
-```
-
-Example shape after merge:
-
-```json
-{
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-  "installCommand": "npm ci",
-  "buildCommand": "npm run build:web && sh -c 'if [ -d apps/web/dist ]; then rm -rf dist && mkdir -p dist && cp -r apps/web/dist/. dist/; elif [ -f dist/index.html ]; then :; else echo Build failed: dist not found && exit 1; fi'",
-  "outputDirectory": "dist",
-  "framework": null,
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }],
-  "git": {
-    "deploymentEnabled": false
-  }
-}
-```
-
-- [ ] **4.2** Leave Vercel **Settings → Git → Ignored Build Step** on **Automatic**. Do not set `exit 0` or “Don’t build anything”.
+- [x] **4.1** Merged `"git": { "deploymentEnabled": false }` into the existing root `vercel.json` (SPA build fields kept).
+- [ ] **4.2** Leave Vercel **Settings → Git → Ignored Build Step** on **Automatic**. Do not set `exit 0` or “Don’t build anything”. *(Confirm in dashboard — cannot be set from repo.)*
 - [ ] **4.3** Merge the `vercel.json` change to `main`.
 - [ ] **4.4** Push a trivial commit to `main` (or merge a tiny PR).
 - [ ] **4.5** Confirm **exactly one** production deployment appears in Vercel, sourced from the CLI / Actions path.
@@ -234,8 +195,6 @@ Example shape after merge:
 - [ ] **4.7** Confirm no red native **Vercel** Git check blocks PRs. Require the **Vercel Preview** workflow check instead (Phase 6).
 
 ---
-
-
 
 ## Phase 5 — Stay private (already done) + prove personal accounts
 
@@ -245,8 +204,6 @@ Example shape after merge:
 - [ ] **5.4** If 5.2 and 5.3 pass, personal commit emails no longer block web deploys.
 
 ---
-
-
 
 ## Phase 6 — Lock it down
 
@@ -261,8 +218,6 @@ Example shape after merge:
 - [ ] **6.9** Keep Render `WEB_ORIGIN` limited to known production (and any approved preview) origins.
 
 ---
-
-
 
 ## Phase 7 — Handover to developers
 
@@ -280,8 +235,6 @@ git config --global user.name "Your GitHub Username"
 Copy the exact noreply address from GitHub → **Settings → Emails**. Do not guess it.
 
 ---
-
-
 
 ## Known trade-offs you are accepting
 
@@ -302,8 +255,6 @@ Unaffected outside Vercel: Render API, Supabase, pg-boss, WhatsApp session behav
 
 ---
 
-
-
 ## Rollback plan
 
 If Actions cutover breaks production:
@@ -315,8 +266,6 @@ If Actions cutover breaks production:
 Optional nuclear option for org-transfer scenarios only: temporarily make the repo public — **not** preferred for NMCAS; treat as last resort.
 
 ---
-
-
 
 ## Troubleshooting
 
@@ -338,8 +287,6 @@ Optional nuclear option for org-transfer scenarios only: temporarily make the re
 
 ---
 
-
-
 ## Appendix A — Replacing System Environment Variables
 
 **Not required for NMCAS** (Phase 0.3 clear). Kept for future regressions.
@@ -360,8 +307,6 @@ Do not rely on `VERCEL_URL` at build time; use a stable configured value if need
 
 ---
 
-
-
 ## Appendix B — Production workflow
 
 Path: `.github/workflows/vercel-production.yml`  
@@ -369,16 +314,12 @@ Path: `.github/workflows/vercel-production.yml`
 
 ---
 
-
-
 ## Appendix C — Preview workflow
 
 Path: `.github/workflows/vercel-preview.yml`  
 (Pinned CLI, fork skip, and PR comment upsert are already in the file in this repo.)
 
 ---
-
-
 
 ## Appendix D — Monorepo note (NMCAS)
 
@@ -389,8 +330,6 @@ Do **not** set workflow `working-directory: apps/web` unless you also change the
 The API on Render is **out of scope** for these workflows. Render continues to deploy from the same GitHub repo via its own integration.
 
 ---
-
-
 
 ## Sign-off
 
@@ -410,8 +349,6 @@ The API on Render is **out of scope** for these workflows. Render continues to d
 **Success criteria:** a developer using a personal Gmail or Yahoo GitHub account opens a PR against this **private** repo, receives a working preview URL comment, merges to `main`, and the Vercel production web app updates via Actions — without buying extra Vercel seats. Render API + Supabase keep working independently.
 
 ---
-
-
 
 ## References
 

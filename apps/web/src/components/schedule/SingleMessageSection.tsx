@@ -30,6 +30,7 @@ import {
 import { cn } from "@/lib/utils";
 import { isUtcIsoAtLeastSecondsAhead } from "../../myt.js";
 import {
+  buildPatchSingleMessageBody,
   buildSingleMessageBody,
   singleMessageFormatLabel,
   singleMessagePreviewBody,
@@ -96,10 +97,11 @@ export function SingleMessageSection({ vm }: SingleMessageSectionProps): ReactEl
     setFormError,
     onGroupSelect,
     onUploadImage,
-    onSaveDraftOnly,
     editingDraftId,
     clearScheduleForm,
     authorizedFetch,
+    messages,
+    refreshMessages,
     MIN_LEAD_SECONDS,
   } = vm;
 
@@ -113,6 +115,38 @@ export function SingleMessageSection({ vm }: SingleMessageSectionProps): ReactEl
   const [localSubmitting, setLocalSubmitting] = useState(false);
 
   const isEditing = editingDraftId !== null;
+
+  const editingDraft = useMemo(
+    () => (editingDraftId !== null ? messages.find((m) => m.id === editingDraftId) : undefined),
+    [editingDraftId, messages],
+  );
+
+  useEffect(() => {
+    if (editingDraft === undefined) {
+      return;
+    }
+    if (editingDraft.operatorKind === "REMINDER") {
+      setOperatorKind("REMINDER");
+      if (
+        editingDraft.reminderTemplateSlotKey !== null &&
+        editingDraft.reminderTemplateSlotKey !== undefined &&
+        editingDraft.reminderTemplateSlotKey.length > 0
+      ) {
+        setSelectedSlotKey(editingDraft.reminderTemplateSlotKey);
+      }
+      return;
+    }
+    setOperatorKind("VALUE");
+    if (editingDraft.valueFormat === "TEXT_ONLY") {
+      setValueFormat("TEXT_ONLY");
+      return;
+    }
+    if (editingDraft.valueFormat === "POLL" || editingDraft.type === "POLL") {
+      setValueFormat("POLL");
+      return;
+    }
+    setValueFormat("IMAGE_CAPTION");
+  }, [editingDraft]);
 
   const selectedProject = useMemo(
     () => projects.find((p) => p.id === selectedProjectId),
@@ -182,7 +216,7 @@ export function SingleMessageSection({ vm }: SingleMessageSectionProps): ReactEl
     return null;
   }
 
-  const isValueFanOut = operatorKind === "VALUE";
+  const isValueFanOut = operatorKind === "VALUE" && !isEditing;
 
   const buildFields = () => ({
     operatorKind,
@@ -191,6 +225,7 @@ export function SingleMessageSection({ vm }: SingleMessageSectionProps): ReactEl
     groupJid,
     groupName: groupPickerLabel,
     fanOut: isValueFanOut ? true : undefined,
+    projectId: selectedProjectId.length > 0 ? selectedProjectId : undefined,
     copyText: operatorKind === "REMINDER" ? reminderPreviewText : copyText,
     imagePath,
     pollQuestion,
@@ -233,7 +268,9 @@ export function SingleMessageSection({ vm }: SingleMessageSectionProps): ReactEl
       }
     }
 
-    const bodyResult = buildSingleMessageBody(buildFields());
+    const bodyResult = isEditing
+      ? buildPatchSingleMessageBody(buildFields(), true)
+      : buildSingleMessageBody(buildFields());
     if (!bodyResult.ok) {
       setFormError(bodyResult.error);
       return;
@@ -253,6 +290,40 @@ export function SingleMessageSection({ vm }: SingleMessageSectionProps): ReactEl
   };
 
   const confirmSchedule = (): void => {
+    if (isEditing && editingDraftId !== null) {
+      const patchResult = buildPatchSingleMessageBody(buildFields(), true);
+      if (!patchResult.ok) {
+        setFormError(patchResult.error);
+        setConfirmOpen(false);
+        return;
+      }
+
+      setLocalSubmitting(true);
+      void (async () => {
+        const res = await authorizedFetch(`/messages/${editingDraftId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(patchResult.body),
+        });
+        setLocalSubmitting(false);
+        setConfirmOpen(false);
+        if (!res.ok) {
+          const err = (await res.json().catch(() => ({}))) as { error?: string };
+          setFormError(err.error ?? `Schedule failed (${String(res.status)})`);
+          return;
+        }
+        const scheduledAt = patchResult.body.scheduledAt;
+        if (typeof scheduledAt === "string") {
+          toast("Message scheduled.");
+        } else {
+          toast("Message scheduled.");
+        }
+        clearScheduleForm();
+        refreshMessages();
+      })();
+      return;
+    }
+
     const bodyResult = buildSingleMessageBody(buildFields());
     if (!bodyResult.ok) {
       setFormError(bodyResult.error);
@@ -283,7 +354,35 @@ export function SingleMessageSection({ vm }: SingleMessageSectionProps): ReactEl
         toast("Message scheduled.");
       }
       clearScheduleForm();
-      vm.refreshMessages();
+      refreshMessages();
+    })();
+  };
+
+  const saveDraft = (): void => {
+    if (editingDraftId === null) {
+      return;
+    }
+    setFormError(null);
+    const patchResult = buildPatchSingleMessageBody(buildFields(), false);
+    if (!patchResult.ok) {
+      setFormError(patchResult.error);
+      return;
+    }
+    setLocalSubmitting(true);
+    void (async () => {
+      const res = await authorizedFetch(`/messages/${editingDraftId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patchResult.body),
+      });
+      setLocalSubmitting(false);
+      if (!res.ok) {
+        const err = (await res.json().catch(() => ({}))) as { error?: string };
+        setFormError(err.error ?? `Save failed (${String(res.status)})`);
+        return;
+      }
+      toast("Draft saved.");
+      refreshMessages();
     })();
   };
 
@@ -597,7 +696,7 @@ export function SingleMessageSection({ vm }: SingleMessageSectionProps): ReactEl
                 type="button"
                 variant="outline"
                 disabled={isBusy}
-                onClick={() => void onSaveDraftOnly()}
+                onClick={() => saveDraft()}
               >
                 Save draft
               </Button>

@@ -13,6 +13,8 @@ export type SingleMessageFields = {
   groupJid: string;
   groupName: string;
   fanOut?: boolean;
+  /** Used to validate fan-out image uploads belong to the active workspace. */
+  projectId?: string;
   copyText: string;
   imagePath: string | null;
   pollQuestion: string;
@@ -23,6 +25,15 @@ export type SingleMessageFields = {
 };
 
 export type BuildResult = { ok: true; body: Record<string, unknown> } | { ok: false; error: string };
+
+/** Fan-out Value posts must reference storage under the active project. */
+export function validateValuePostImagePath(imagePath: string, projectId: string): string | null {
+  const prefix = `posts/${projectId}/`;
+  if (!imagePath.startsWith(prefix)) {
+    return "Image must be uploaded for this workspace. Remove it and upload again.";
+  }
+  return null;
+}
 
 function parseScheduledAt(scheduledLocal: string): BuildResult & { scheduledAt?: string } {
   try {
@@ -71,6 +82,12 @@ export function buildSingleMessageBody(fields: SingleMessageFields): BuildResult
       };
     }
     if (fields.fanOut === true) {
+      if (fields.projectId !== undefined && fields.projectId.length > 0) {
+        const pathErr = validateValuePostImagePath(fields.imagePath, fields.projectId);
+        if (pathErr !== null) {
+          return { ok: false, error: pathErr };
+        }
+      }
       return {
         ok: true,
         body: {
@@ -168,6 +185,117 @@ export function buildSingleMessageBody(fields: SingleMessageFields): BuildResult
       pollOptions: trimmedOpts,
       pollMultiSelect: fields.pollMultiSelect,
       scheduledAt,
+    },
+  };
+}
+
+export function buildPatchSingleMessageBody(
+  fields: SingleMessageFields,
+  publish: boolean,
+): BuildResult {
+  const timeResult = parseScheduledAt(fields.scheduledLocal);
+  if (!timeResult.ok || timeResult.scheduledAt === undefined) {
+    return { ok: false, error: timeResult.ok ? "Invalid time" : timeResult.error };
+  }
+  const scheduledAt = timeResult.scheduledAt;
+
+  if (fields.operatorKind === "REMINDER") {
+    if (fields.reminderTemplateId.length === 0) {
+      return { ok: false, error: "Pick a reminder template slot." };
+    }
+    return {
+      ok: true,
+      body: {
+        operatorKind: "REMINDER",
+        reminderTemplateId: fields.reminderTemplateId,
+        customValues: fields.customValues,
+        groupJid: fields.groupJid,
+        groupName: fields.groupName,
+        scheduledAt,
+        publish,
+      },
+    };
+  }
+
+  if (fields.valueFormat === "IMAGE_CAPTION") {
+    if (publish) {
+      if (fields.imagePath === null || fields.imagePath.length === 0) {
+        return { ok: false, error: "Upload an image for this Value post." };
+      }
+      if (fields.copyText.trim().length === 0) {
+        return { ok: false, error: "Enter a caption for the image." };
+      }
+    }
+    if (fields.copyText.length > WHATSAPP_POST_TEXT_MAX_CHARS) {
+      return {
+        ok: false,
+        error: `Caption must be at most ${String(WHATSAPP_POST_TEXT_MAX_CHARS)} characters.`,
+      };
+    }
+    return {
+      ok: true,
+      body: {
+        operatorKind: "VALUE",
+        valueFormat: "IMAGE_CAPTION",
+        groupJid: fields.groupJid,
+        groupName: fields.groupName,
+        scheduledAt,
+        publish,
+        copyText: fields.copyText.trim().length > 0 ? fields.copyText.trim() : undefined,
+        imageUrl: fields.imagePath ?? undefined,
+      },
+    };
+  }
+
+  if (fields.valueFormat === "TEXT_ONLY") {
+    if (publish && fields.copyText.trim().length === 0) {
+      return { ok: false, error: "Enter message text." };
+    }
+    if (fields.copyText.length > WHATSAPP_POST_TEXT_MAX_CHARS) {
+      return {
+        ok: false,
+        error: `Message must be at most ${String(WHATSAPP_POST_TEXT_MAX_CHARS)} characters.`,
+      };
+    }
+    return {
+      ok: true,
+      body: {
+        operatorKind: "VALUE",
+        valueFormat: "TEXT_ONLY",
+        groupJid: fields.groupJid,
+        groupName: fields.groupName,
+        scheduledAt,
+        publish,
+        copyText: fields.copyText.trim().length > 0 ? fields.copyText.trim() : undefined,
+      },
+    };
+  }
+
+  const trimmedQ = fields.pollQuestion.trim();
+  const trimmedOpts = fields.pollOptions.map((o) => o.trim()).filter((o) => o.length > 0);
+  if (publish) {
+    if (trimmedQ.length === 0) {
+      return { ok: false, error: "Enter a poll question." };
+    }
+    if (trimmedOpts.length < 2) {
+      return { ok: false, error: "Add at least two non-empty poll options (up to 12)." };
+    }
+  }
+  if (trimmedOpts.length > 12) {
+    return { ok: false, error: "WhatsApp allows at most 12 poll options." };
+  }
+  return {
+    ok: true,
+    body: {
+      operatorKind: "VALUE",
+      valueFormat: "POLL",
+      groupJid: fields.groupJid,
+      groupName: fields.groupName,
+      scheduledAt,
+      publish,
+      pollQuestion: trimmedQ.length > 0 ? trimmedQ : undefined,
+      pollOptions: trimmedOpts,
+      pollMultiSelect: fields.pollMultiSelect,
     },
   };
 }

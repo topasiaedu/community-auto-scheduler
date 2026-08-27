@@ -23,8 +23,7 @@ export function registerWaRoutes(app: FastifyInstance, waPool: WaConnectionPool)
     const wa = waPool.getManager(projectId);
     const snap = wa.getStatusSnapshot();
     // Keep this endpoint cheap: never await a cold boot/persist on the request path.
-    // Re-kick when not connected and no QR — but skip if a boot is already running.
-    if (snap.state !== "connected" && snap.hasQr === false && !wa.isStartWorkInFlight()) {
+    if (wa.shouldKickStartForQr()) {
       void wa.start();
       return wa.getStatusSnapshot();
     }
@@ -39,7 +38,7 @@ export function registerWaRoutes(app: FastifyInstance, waPool: WaConnectionPool)
     const wa = waPool.getManager(projectId);
     const qr = wa.getLatestQr();
     if (qr === undefined) {
-      if (wa.getUiState() !== "connected" && !wa.isStartWorkInFlight()) {
+      if (wa.shouldKickStartForQr()) {
         void wa.start();
       }
       return reply.code(204).send();

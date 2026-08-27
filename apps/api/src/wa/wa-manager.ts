@@ -254,6 +254,9 @@ export class WaManager {
    */
   private isLoggedOut: boolean = false;
 
+  /** Debounced auto-repair after QR channel timeout / error (no manual reset required). */
+  private qrRepairTimer: ReturnType<typeof setTimeout> | undefined;
+
   private static readonly GROUP_CACHE_TTL_MS = 5 * 60_000;
 
   /** Was 60s; 8MB session re-read every minute caused avoidable heap spikes on 512MB. */
@@ -340,6 +343,28 @@ export class WaManager {
     return this.startWorkInFlight;
   }
 
+  /**
+   * True when `/wa/status` or `/wa/qr` should re-kick `start()` to (re)open QR pairing.
+   * Avoids kicking while actively awaiting the first QR payload on an open channel.
+   */
+  shouldKickStartForQr(): boolean {
+    if (this.startWorkInFlight || this.latestQr !== undefined) {
+      return false;
+    }
+    if (
+      this.qrPairingActive &&
+      (this.bootPhase === "awaiting_scan" ||
+        this.bootPhase === "qr_connect" ||
+        this.bootPhase === "qr_channel")
+    ) {
+      return false;
+    }
+    if (this.uiState === "connected" && !this.qrPairingActive) {
+      return false;
+    }
+    return true;
+  }
+
   /** Marks this manager as mid QR-link so the pool will not shut it down for RAM. */
   markQrPairingActive(): void {
     this.qrPairingActive = true;
@@ -360,6 +385,7 @@ export class WaManager {
     }
     // A fresh start supersedes any pending reconnect timer.
     this.isLoggedOut = false;
+    this.cancelQrRepairTimer();
     this.cancelReconnectTimer();
     this.touchActivity();
     // Ensure HTTP status snapshots immediately show "connecting" after a cold start kick.
@@ -396,7 +422,11 @@ export class WaManager {
       return false;
     }
     try {
-      return await client.isConnected();
+      const connected = await client.isConnected();
+      if (!connected) {
+        return false;
+      }
+      return await client.isLoggedIn();
     } catch {
       return false;
     }
@@ -701,6 +731,7 @@ export class WaManager {
   async shutdown(): Promise<void> {
     this.isShuttingDown = true;
     this.cancelReconnectTimer();
+    this.cancelQrRepairTimer();
     this.stopGroupsRefreshLoop();
     this.bootPhase = "shutdown";
     this.waOpChain = this.waOpChain
@@ -806,10 +837,34 @@ export class WaManager {
     if (existing !== undefined) {
       try {
         if (await existing.isConnected()) {
-          this.uiState = "connected";
-          this.loggedInWaitFailures = 0;
-          this.bootPhase = undefined;
-          this.ensureGroupsRefreshLoop();
+          const loggedIn = await this.safeIsLoggedIn(existing);
+          if (loggedIn) {
+            this.uiState = "connected";
+            this.qrPairingActive = false;
+            this.latestQr = undefined;
+            this.loggedInWaitFailures = 0;
+            this.bootPhase = undefined;
+            this.cancelQrRepairTimer();
+            this.ensureGroupsRefreshLoop();
+            return;
+          }
+          if (
+            this.bootPhase === "awaiting_scan" ||
+            this.bootPhase === "qr_connect" ||
+            this.bootPhase === "qr_channel"
+          ) {
+            this.uiState = "connecting";
+            return;
+          }
+          console.warn(
+            `[WaManager] socket connected but not logged in projectId=${this.projectId}; repairing`,
+          );
+          await this.disposeClientQuietly(existing);
+          this.client = undefined;
+          this.latestQr = undefined;
+          this.qrPairingActive = false;
+          await wipeWhatsAppStore(this.prisma, this.env, this.projectId);
+          await this.boot();
           return;
         }
         if (await existing.isLoggedIn()) {
@@ -882,6 +937,7 @@ export class WaManager {
       this.uiState = "connecting";
       this.qrPairingActive = true;
       this.lastError = undefined;
+      this.cancelQrRepairTimer();
       // QR linking is the operator flow; reconnect backoff is not relevant.
       this.cancelReconnectTimer();
     });
@@ -889,22 +945,21 @@ export class WaManager {
     client.on("qr:timeout", () => {
       this.latestQr = undefined;
       this.qrPairingActive = false;
-      this.lastError = "QR channel timed out — tap Clear session or Refresh QR";
+      this.bootPhase = undefined;
+      this.lastError = "QR timed out — retrying automatically…";
+      this.uiState = "disconnected";
       console.warn(`[WaManager] QR channel timed out projectId=${this.projectId}`);
-      // Allow the next status/QR poll to re-kick start() → fresh pairing.
-      if (this.uiState !== "connected") {
-        this.uiState = "disconnected";
-      }
+      this.scheduleQrRepair("qr_timeout");
     });
 
     client.on("qr:error", (payload) => {
       this.latestQr = undefined;
       this.qrPairingActive = false;
-      this.lastError = `QR error: ${payload.event}`;
+      this.bootPhase = undefined;
+      this.lastError = `QR error: ${payload.event} — retrying automatically…`;
       console.error(`[WaManager] QR error projectId=${this.projectId} event=${payload.event}`);
-      if (this.uiState !== "connected") {
-        this.uiState = "disconnected";
-      }
+      this.uiState = "disconnected";
+      this.scheduleQrRepair(`qr_error_${payload.event}`);
     });
 
     client.on("connected", () => {
@@ -914,6 +969,7 @@ export class WaManager {
       this.loggedInWaitFailures = 0;
       this.lastError = undefined;
       this.bootPhase = undefined;
+      this.cancelQrRepairTimer();
       this.startPersistTimer();
       this.ensureGroupsRefreshLoop();
       // Connection succeeded; reset reconnect backoff.
@@ -1277,6 +1333,51 @@ export class WaManager {
     }
   }
 
+  private cancelQrRepairTimer(): void {
+    if (this.qrRepairTimer !== undefined) {
+      clearTimeout(this.qrRepairTimer);
+      this.qrRepairTimer = undefined;
+    }
+  }
+
+  /**
+   * After QR channel timeout/error, wipe and re-boot so operators are not stuck on manual reset.
+   */
+  private scheduleQrRepair(reason: string): void {
+    if (this.isShuttingDown || this.isLoggedOut) {
+      return;
+    }
+    this.cancelQrRepairTimer();
+    this.qrRepairTimer = setTimeout(() => {
+      this.qrRepairTimer = undefined;
+      this.waOpChain = this.waOpChain
+        .then(async () => {
+          const client = this.client;
+          if (client !== undefined && (await this.safeIsLoggedIn(client))) {
+            return;
+          }
+          console.warn(`[WaManager] QR repair projectId=${this.projectId} reason=${reason}`);
+          this.latestQr = undefined;
+          this.qrPairingActive = false;
+          this.uiState = "disconnected";
+          this.bootPhase = "qr_repair";
+          if (client !== undefined) {
+            await this.disposeClientQuietly(client);
+            this.client = undefined;
+          }
+          await wipeWhatsAppStore(this.prisma, this.env, this.projectId);
+          await this.boot();
+        })
+        .catch((err: unknown) => {
+          this.bootPhase = undefined;
+          const message = err instanceof Error ? err.message : String(err);
+          this.lastError = message;
+          console.error(`[WaManager] QR repair failed projectId=${this.projectId}:`, err);
+        });
+    }, 3_000);
+    this.qrRepairTimer.unref?.();
+  }
+
   private cancelReconnectTimer(): void {
     if (this.reconnectTimer !== undefined) {
       clearTimeout(this.reconnectTimer);
@@ -1402,7 +1503,7 @@ export class WaManager {
     }
     this.markQrPairingActive();
     this.bootPhase = "qr_channel";
-    await withTimeout(client.getQRChannel(), 30_000, "getQRChannel");
+    await client.getQRChannel();
     this.bootPhase = "qr_connect";
     await client.connect();
     this.bootPhase = "awaiting_scan";

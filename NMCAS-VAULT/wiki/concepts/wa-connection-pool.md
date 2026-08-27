@@ -1,8 +1,8 @@
 ---
 title: "WhatsApp connection pool (whatsmeow-node)"
 type: "concept"
-updated: "2026-07-27"
-sources: 8
+updated: "2026-08-27"
+sources: 10
 tags: ["whatsmeow", "whatsapp", "architecture", "nmcas"]
 ---
 
@@ -51,6 +51,13 @@ As of [[wiki/sources/2026-07-27-wa-reliability-always-on-plan]] (not yet impleme
 - Steady-state cost ~80 MB (Node delta + ~29 MB Go); send/media spikes are separate from idle eviction savings.
 
 Agent briefs: [[wiki/sources/2026-07-27-wa-reliability-agent-prompts]].
+
+### QR pairing on 512 MB DO (2026-08-27)
+
+Two incidents the same day with overlapping UI:
+
+- **RAM-first boot** — QR channel opened but `qr` never fired when Go spawned under peer-client pressure. Fix: `openFreshQrPairing()`, max 3 retries, `POST /wa/pair-code`. Set **`WA_MAX_WARM_CLIENTS=1`** on 512 MB. Post-mortem: [[wiki/sources/2026-08-27-wa-qr-pairing-do512-incident-session]], [[wiki/concepts/wa-qr-pairing-low-ram]].
+- **Client outdated** — same `awaiting_scan` / 204 QR, but `/health` was fine. PM2: `err-client-outdated`. Fix: **whatsmeow-node 0.6.0 → 0.7.0** + restart. Pin and bump the npm package when WhatsApp expires the bundled version. Post-mortem: [[wiki/sources/2026-08-27-wa-qr-client-outdated-whatsmeow-upgrade]].
 
 ---
 
@@ -113,8 +120,9 @@ Historical Render settings (Docker): `NODE_OPTIONS=--max-old-space-size=256` aft
 
 - **Shared 512 MB Droplet** + **2 GB swap**; PM2 process `nmcas-api` on port **3002**; nginx TLS at `nmcas-server.nmmedia.app`.
 - Steady state ~175–265 MB with one warm WA client; connect/hydrate spike ~700 MB — swap absorbs lag; PM2 restarts on hard failure.
-- **Idle eviction:** `wa-pool.ts` evicts WA after 10 min dashboard idle; max 1 warm client.
+- **Idle eviction:** `wa-pool.ts` evicts WA after 10 min dashboard idle when `WA_ALWAYS_ON=false`; when always-on, max-warm cap applies — **use `WA_MAX_WARM_CLIENTS=1` on 512 MB** for reliable QR pairing (2026-08-27).
 - **Session persist throttle:** 5 min interval; skip unchanged `WhatsAppSessionBlob` (mtime/size fingerprint).
+- **QR pairing:** RAM-first boot via `openFreshQrPairing()`; phone code fallback — see [[wiki/concepts/wa-qr-pairing-low-ram]].
 - **Never run Render + DO API together** — shared pg-boss queue risks duplicate sends.
 
 ### Supabase
@@ -134,15 +142,18 @@ Unofficial WhatsApp clients (Baileys / whatsmeow) can trigger account restrictio
 - Stability hardening: `raw/sources/2026-04-21-stability-hardening-session.md`
 - whatsmeow migration + deploy: `raw/sources/2026-07-06-whatsmeow-deploy-product-ux-session.md`
 - DO migration + OOM incident: `raw/sources/2026-07-16-do-migration-oom-incident-session.md`
+- QR pairing on DO 512 MB: `raw/sources/2026-08-27-wa-qr-pairing-do512-incident-session.md`
 
 ## See also
 
 - [[wiki/concepts/value-vs-reminder-messages]]
 - [[wiki/concepts/multi-project-architecture]]
 - [[wiki/concepts/pg-boss-scheduler]]
+- [[wiki/concepts/wa-qr-pairing-low-ram]]
 - [[wiki/entities/project]]
 - [[wiki/entities/scheduled-message]]
 - [[wiki/sources/2026-04-21-stability-hardening-session]]
 - [[wiki/sources/2026-07-06-whatsmeow-deploy-product-ux-session]]
 - [[wiki/sources/2026-07-16-do-migration-oom-incident-session]]
+- [[wiki/sources/2026-08-27-wa-qr-pairing-do512-incident-session]]
 - [[wiki/overview]]

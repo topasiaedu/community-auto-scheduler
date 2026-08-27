@@ -26,6 +26,10 @@ Catalog of all wiki pages. Updated after every ingest, filed query, or lint pass
 - [[wiki/sources/2026-07-18-media-egress-agent-prompts]] — Agent 1 compress / Agent 2 cache copy-paste prompts (~200k context).
 - [[wiki/sources/2026-07-27-wa-reliability-always-on-plan]] — Design: always-on WA, receipt-gated SENT, periodic groups; engagement tracker deferred.
 - [[wiki/sources/2026-07-27-wa-reliability-agent-prompts]] — Agents 1–3 reliability prompts + deferred Agent 4 engagement (~200k context).
+- [[wiki/sources/2026-08-26-vercel-private-repo-actions-cutover]] — Private repo web deploy cutover: Actions + `VERCEL_TOKEN`; phases 0–5 done; 6–7 deferred.
+- [[wiki/sources/2026-08-27-wa-qr-pairing-do512-incident-session]] — QR never shown / timeout loop on DO 512 MB; RAM-first pairing, phone code fallback, groups timeout; `WA_MAX_WARM_CLIENTS=1`.
+- [[wiki/sources/2026-08-27-wa-qr-client-outdated-whatsmeow-upgrade]] — Same QR UI on healthy RAM; `err-client-outdated`; whatsmeow-node 0.6.0 → 0.7.0 on DO; `qr event` codeLen=277.
+- [[wiki/sources/2026-08-27-queue-draft-resume-imageurl-session]] — Queue Resume no-op + fan-out POST on draft; fixes `205569d` / `9f71e25` (navigate + PATCH).
 - `raw/sources/2026-07-10-p8a-late-campaign-partial-schedule.md` — P8-A agent brief: skip past / explicit Welcome skip for Show Up campaigns.
 - `raw/sources/2026-07-10-p8b-value-fan-out-active-communities.md` — P8-B agent brief: Value fan-out from Single message + active communities in Settings.
 
@@ -37,8 +41,10 @@ Catalog of all wiki pages. Updated after every ingest, filed query, or lint pass
 - [[wiki/concepts/compounding-knowledge-base]] — LLM Wiki as persistent compiled layer; ingest / query / lint.
 - [[wiki/concepts/value-vs-reminder-messages]] — Operator model: Value post (fresh copy, poll nested) vs Reminder (SOP assets, stickers, countdowns).
 - [[wiki/concepts/multi-project-architecture]] — Project as top-level entity; how resources are scoped per project.
-- [[wiki/concepts/wa-connection-pool]] — whatsmeow-node pool; SQLite + WhatsAppSessionBlob; planned always-on + supervised reconnect (2026-07-27); DO memory notes.
+- [[wiki/concepts/wa-connection-pool]] — whatsmeow-node pool; SQLite + WhatsAppSessionBlob; always-on + QR pairing RAM notes (2026-08-27).
+- [[wiki/concepts/wa-qr-pairing-low-ram]] — QR / phone pairing on 512 MB DO; RAM-first boot vs client-outdated 405; env tuning.
 - [[wiki/concepts/pg-boss-scheduler]] — pg-boss Postgres-backed job queue; rescue sweep; requeue route; race protection table.
+- [[wiki/concepts/vercel-github-actions-deploy]] — Private-repo web deploys via Actions + CLI token; native Git disabled.
 
 ---
 
@@ -57,4 +63,4 @@ Catalog of all wiki pages. Updated after every ingest, filed query, or lint pass
 
 ---
 
-*Last indexed: 2026-07-27 — WA reliability always-on plan and agent prompts.*
+*Last indexed: 2026-08-27 — Queue draft Resume + Value imageUrl path session.*

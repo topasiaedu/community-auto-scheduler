@@ -355,6 +355,9 @@ export class WaManager {
     if (this.startWorkInFlight || this.latestQr !== undefined) {
       return false;
     }
+    if (this.qrRepairAttempts >= WaManager.MAX_QR_REPAIR_ATTEMPTS) {
+      return false;
+    }
     if (
       this.qrPairingActive &&
       (this.bootPhase === "awaiting_scan" ||
@@ -1007,6 +1010,14 @@ export class WaManager {
         } catch {
           /* ignore */
         }
+      }
+      if (payload.event === "err-client-outdated") {
+        this.qrRepairAttempts = WaManager.MAX_QR_REPAIR_ATTEMPTS;
+        this.lastError =
+          "WhatsApp rejected this app version (client outdated). Update @whatsmeow-node/whatsmeow-node on the server, then Clear session.";
+        this.bootPhase = undefined;
+        this.qrPairingActive = false;
+        return;
       }
       this.scheduleQrRepair(`qr_error_${payload.event}`);
     });

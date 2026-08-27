@@ -1,8 +1,8 @@
 ---
 title: "Value post vs Reminder (operator message model)"
 type: "concept"
-updated: "2026-07-08"
-sources: 3
+updated: "2026-08-27"
+sources: 4
 tags: ["nmcas", "product", "whatsapp", "sop", "ux"]
 ---
 
@@ -20,11 +20,15 @@ NMCAS schedules WhatsApp community sends using two **operator-facing** kinds. Th
 
 | Format | Use | Fields | Where |
 |--------|-----|--------|-------|
-| **Image + caption** (`IMAGE_CAPTION`) | Default | `imageUrl` + `copyText` | **Single message** — fans out to all Announcements channels |
+| **Image + caption** (`IMAGE_CAPTION`) | Default | `imageUrl` + `copyText` | **Single message** — **new** sends fan out to active communities’ Announcements channels |
 | **Poll** (`POLL`) | Occasional engagement | poll fields | Single message |
 | **Text only** (`TEXT_ONLY`) | Rare | `copyText` | Single message |
 
 Intern rule: *"We're writing something new → Value."*
+
+**New Value create** (`fanOut: true`): `imageUrl` must be under `posts/{projectId}/` (upload path from `POST /uploads/post-image` or `/uploads/media?kind=post`).
+
+**Resumed DRAFT** (Queue Edit / Resume): publish updates **that one row** via `PATCH /messages/:id` — not fan-out. See [[wiki/sources/2026-08-27-queue-draft-resume-imageurl-session]].
 
 **Campaign wizard does not schedule Value posts** (owner decision 2026-07-08).
 

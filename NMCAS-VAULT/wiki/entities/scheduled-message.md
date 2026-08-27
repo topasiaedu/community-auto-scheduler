@@ -1,8 +1,8 @@
 ---
 title: "Entity: ScheduledMessage"
 type: "entity"
-updated: "2026-07-27"
-sources: 4
+updated: "2026-08-27"
+sources: 5
 tags: ["entity", "nmcas", "data-model"]
 ---
 
@@ -103,9 +103,13 @@ Legacy: if `operatorKind` null, fall back to `type` POST/POLL.
 | Source | campaignId | Typical count |
 |--------|------------|---------------|
 | Campaign wizard | set | 6 Reminders + (3 + optional) × N communities |
-| Single message | null | 1 |
+| Single message | null | 1 (or N if Value fan-out create) |
 
 Post-confirm campaign rows are edited only via per-row Queue actions (cancel, re-queue, draft) — no bulk campaign edit in v1.
+
+### Draft edit / Resume (2026-08-27)
+
+Queue **Edit** on PENDING → `POST /messages/:id/draft` (status `DRAFT`, job cancelled). **Resume** must open Schedule single-message compose and publish with **`PATCH /messages/:id`** (`publish: true`), not a new fan-out `POST /messages`. Fan-out create still requires `imageUrl` under `posts/{projectId}/`. See [[wiki/sources/2026-08-27-queue-draft-resume-imageurl-session]].
 
 ## Event-relative schedule (fixed clocks)
 
@@ -128,3 +132,4 @@ Full spec: [[wiki/concepts/campaign-message-schedule]], [[wiki/analysis/p7-ux-sp
 - [[wiki/concepts/value-vs-reminder-messages]]
 - [[wiki/entities/project]]
 - [[wiki/concepts/pg-boss-scheduler]]
+- [[wiki/sources/2026-08-27-queue-draft-resume-imageurl-session]]

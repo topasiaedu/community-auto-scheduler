@@ -1,8 +1,8 @@
 ---
 title: "NMCAS vault overview"
 type: "overview"
-updated: "2026-07-16"
-sources: 9
+updated: "2026-08-27"
+sources: 12
 tags: ["nmcas", "meta"]
 ---
 
@@ -24,7 +24,7 @@ Any team member including interns. UI must be learnable without documentation.
 
 See [[wiki/concepts/value-vs-reminder-messages]], [[wiki/sources/2026-07-08-p7-campaign-scheduler-ship-session]]:
 
-- **Value post** — fresh copy; schedule via **Single message** (image+caption / poll / text); fans out to all community Announcements channels
+- **Value post** — fresh copy; schedule via **Single message** (image+caption / poll / text); **new** sends fan out to active communities’ Announcements channels; **Queue draft Resume** publishes that one row via PATCH ([[wiki/sources/2026-08-27-queue-draft-resume-imageurl-session]])
 - **Reminder** — SOP Show Up playbook; **Campaign** wizard schedules one community’s reminder sequence; IMAGE slots use long SOP captions; LIVE NOW = TEXT; post-live sticker optional until WebP uploaded
 - Legacy **Post** / **Poll** rows still send via worker fallback
 
@@ -32,12 +32,12 @@ See [[wiki/concepts/value-vs-reminder-messages]], [[wiki/sources/2026-07-08-p7-c
 
 - `MessageType` `POST` | `POLL` kept for legacy / backfill
 
-## Production (2026-07)
+## Production (2026-08)
 
 | Component | Host |
 |-----------|------|
-| API | **DigitalOcean** — `https://nmcas-server.nmmedia.app` (PM2, shared 512 MB Droplet + swap; port 3002 behind nginx) — see [[wiki/sources/2026-07-16-do-migration-oom-incident-session]] |
-| Web | Vercel — `community-auto-scheduler-web.vercel.app` |
+| API | **DigitalOcean** — `https://nmcas-server.nmmedia.app` (PM2, shared 512 MB Droplet + swap; port 3002 behind nginx) — see [[wiki/sources/2026-07-16-do-migration-oom-incident-session]]; keep **whatsmeow-node** current ([[wiki/sources/2026-08-27-wa-qr-client-outdated-whatsmeow-upgrade]]) |
+| Web | Vercel — `community-auto-scheduler-web.vercel.app` — **GitHub Actions + CLI** deploys (`git.deploymentEnabled: false`); see [[wiki/concepts/vercel-github-actions-deploy]], [[wiki/sources/2026-08-26-vercel-private-repo-actions-cutover]] |
 | DB / Auth / post images | Supabase |
 | Render API (retired) | `community-auto-scheduler.onrender.com` — **suspended** after DO cutover (2026-07-16) |
 
@@ -49,7 +49,7 @@ See [[wiki/concepts/value-vs-reminder-messages]], [[wiki/sources/2026-07-08-p7-c
 | Sessions | Local SQLite + **`WhatsAppSessionBlob`** in Postgres | Survives Render deploys; pooler-friendly `DATABASE_URL` |
 | Post images | Supabase Storage private bucket | Worker downloads at send time |
 | Queue | pg-boss on Supabase Postgres | No Redis; one infra for DB + queue |
-| Hosting | DO (API) + Vercel (FE) + Supabase | API moved off Render after OOM incident (2026-07-16); see [[wiki/sources/2026-07-16-do-migration-oom-incident-session]] |
+| Hosting | DO (API) + Vercel (FE via Actions) + Supabase | API on DO after OOM (2026-07-16); web cut over to Actions deploy 2026-08-26 ([[wiki/concepts/vercel-github-actions-deploy]]) |
 | Timezone | MYT UTC+8, hardcoded V1 | All communities are Malaysia-based |
 
 ## V1 scope
@@ -75,7 +75,9 @@ See [[wiki/sources/2026-04-13-nmcas-prd-v1]] for full requirements. Out of scope
 - [[wiki/concepts/value-vs-reminder-messages]]
 - [[wiki/concepts/multi-project-architecture]]
 - [[wiki/concepts/wa-connection-pool]]
+- [[wiki/concepts/wa-qr-pairing-low-ram]]
 - [[wiki/concepts/pg-boss-scheduler]]
+- [[wiki/concepts/vercel-github-actions-deploy]]
 - [[wiki/entities/project]]
 - [[wiki/entities/scheduled-message]]
 - [[wiki/sources/2026-04-13-nmcas-prd-v1]]
@@ -86,3 +88,6 @@ See [[wiki/sources/2026-04-13-nmcas-prd-v1]] for full requirements. Out of scope
 - [[wiki/sources/2026-07-06-whatsmeow-deploy-product-ux-session]]
 - [[wiki/sources/2026-07-07-whatsapp-community-sop-dr-jasmine-show-up-reference]]
 - [[wiki/sources/2026-07-16-do-migration-oom-incident-session]]
+- [[wiki/sources/2026-08-27-wa-qr-pairing-do512-incident-session]]
+- [[wiki/sources/2026-08-27-wa-qr-client-outdated-whatsmeow-upgrade]]
+- [[wiki/sources/2026-08-27-queue-draft-resume-imageurl-session]]

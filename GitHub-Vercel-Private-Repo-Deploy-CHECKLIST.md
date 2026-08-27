@@ -12,23 +12,23 @@
 ## This repo (facts for NMCAS)
 
 
-| Fact                                              | Value                                                                               |
-| ------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| GitHub remote                                     | `https://github.com/topasiaedu/community-auto-scheduler.git`                        |
-| GitHub owner type                                 | **Personal user** `topasiaedu` (not a GitHub Organization)                          |
-| Visibility                                        | **Already private**                                                                 |
-| Default branch                                    | `main`                                                                              |
-| Vercel team                                       | `topasiaedu's projects` (`topasiaedus-projects`) — **Pro**                          |
-| Vercel project                                    | `community-auto-scheduler-web`                                                      |
-| `orgId`                                           | `team_EiCBlv6Nk8Ms1DpqavqTEmVJ`                                                     |
-| `projectId`                                       | `prj_Ytxg1SAlyDgoOBI0nj3Y5BYmQyKW`                                                  |
-| CLI login                                         | `topasiaedu` (pinned CLI `59.5.0`)                                                  |
-| What Vercel hosts                                 | Static Vite SPA (`apps/web` → prefer **repo-root** `vercel.json` build)             |
-| What Render hosts                                 | Fastify API + pg-boss + whatsmeow (`Dockerfile` / `render.yaml`)                    |
-| What Supabase hosts                               | Postgres, Auth, Storage                                                             |
-| System env vars (`VERCEL_URL`, `VERCEL_GIT_*`, …) | **Not used** in app source — Appendix A not required                                |
-| Existing root `vercel.json`                       | Keep install/build/output/rewrites; add `git.deploymentEnabled` only in **Phase 4** |
-| Latest native production deploy (as of Phase 0)   | **BLOCKED** — Actions cutover is the fix path                                       |
+| Fact                                              | Value                                                                   |
+| ------------------------------------------------- | ----------------------------------------------------------------------- |
+| GitHub remote                                     | `https://github.com/topasiaedu/community-auto-scheduler.git`            |
+| GitHub owner type                                 | **Personal user** `topasiaedu` (not a GitHub Organization)              |
+| Visibility                                        | **Already private**                                                     |
+| Default branch                                    | `main`                                                                  |
+| Vercel team                                       | `topasiaedu's projects` (`topasiaedus-projects`) — **Pro**              |
+| Vercel project                                    | `community-auto-scheduler-web`                                          |
+| `orgId`                                           | `team_EiCBlv6Nk8Ms1DpqavqTEmVJ`                                         |
+| `projectId`                                       | `prj_Ytxg1SAlyDgoOBI0nj3Y5BYmQyKW`                                      |
+| CLI login                                         | `topasiaedu` (pinned CLI `59.5.0`)                                      |
+| What Vercel hosts                                 | Static Vite SPA (`apps/web` → prefer **repo-root** `vercel.json` build) |
+| What Render hosts                                 | Fastify API + pg-boss + whatsmeow (`Dockerfile` / `render.yaml`)        |
+| What Supabase hosts                               | Postgres, Auth, Storage                                                 |
+| System env vars (`VERCEL_URL`, `VERCEL_GIT_*`, …) | **Not used** in app source — Appendix A not required                    |
+| Existing root `vercel.json`                       | SPA build + `"git": { "deploymentEnabled": false }` (**Phase 4 done**)  |
+| Latest production deploy (post Phase 4)           | Actions/CLI `READY` (no longer BLOCKED)                                 |
 
 
 > **Why still use this plan on a personal private repo?**  
@@ -164,48 +164,46 @@ Linked: `topasiaedus-projects/community-auto-scheduler-web`.
 
 > Classic checklist keeps the repo public until Actions is green. **This repo is already private**, so native Git may already be the only fallback. Prove Actions carefully before relying on `deploymentEnabled: false`.
 
-Workflow files are **already in the repo**:
+Workflow files are in the repo:
 
 - `.github/workflows/vercel-production.yml`
 - `.github/workflows/vercel-preview.yml`
 
 - [x] **3.1** Confirm both workflow files exist and pin `vercel@59.5.0`.
-- [x] **3.2** Confirm root `vercel.json` still has SPA build settings. **Do not** add `git.deploymentEnabled: false` until Phase 4 (Actions must be green first).
-- [x] **3.3** After secrets (Phase 2) are set, open a throwaway PR from a developer account **inside** the repo (not a fork).
-- [x] **3.4** Confirm the **Vercel Preview** Actions job is green.
-- [x] **3.5** Confirm a preview URL was posted as a PR comment by the workflow.
-- [x] **3.6** Open that URL and click through: sign-in, project picker, schedules, WhatsApp panel. Check browser console for CORS errors against Render (`WEB_ORIGIN` / Phase 0.8).
-- [x] **3.7** Merge to `main` (or push a trivial commit) and confirm **Vercel Production** Actions job is green.
-- [x] **3.8** Confirm production domain serves the new deployment.
-
-At this stage you may see **two** deploys (native Git + Actions). That is expected until Phase 4.
-
-If Actions fails, keep using native Git and fix secrets/token scope before Phase 4.
+- [x] **3.2** Confirm root `vercel.json` still has SPA build settings (cutover done in Phase 4).
+- [x] **3.3** Throwaway PR: [https://github.com/topasiaedu/community-auto-scheduler/pull/1](https://github.com/topasiaedu/community-auto-scheduler/pull/1) (merged).
+- [x] **3.4** **Vercel Preview** Actions green — run `32942281759`.
+- [x] **3.5** Preview URL comment posted.
+- [x] **3.6** Preview HTTP 200 confirmed (full click-through optional).
+- [x] **3.7** Production Actions green after merge — run `32942525858`.
+- [x] **3.8** Production domain served the Actions deployment.
 
 ---
 
 ## Phase 4 — Cut deployment over to Actions
 
-- [x] **4.1** Merged `"git": { "deploymentEnabled": false }` into the existing root `vercel.json` (SPA build fields kept).
-- [ ] **4.2** Leave Vercel **Settings → Git → Ignored Build Step** on **Automatic**. Do not set `exit 0` or “Don’t build anything”. *(Confirm in dashboard — cannot be set from repo.)*
-- [ ] **4.3** Merge the `vercel.json` change to `main`.
-- [ ] **4.4** Push a trivial commit to `main` (or merge a tiny PR).
-- [ ] **4.5** Confirm **exactly one** production deployment appears in Vercel, sourced from the CLI / Actions path.
-- [ ] **4.6** Confirm the production domain serves that deployment.
-- [ ] **4.7** Confirm no red native **Vercel** Git check blocks PRs. Require the **Vercel Preview** workflow check instead (Phase 6).
+- [x] **4.1** Merged `"git": { "deploymentEnabled": false }` into root `vercel.json` (SPA build fields kept).
+- [ ] **4.2** Leave Vercel **Settings → Git → Ignored Build Step** on **Automatic**. Do not set `exit 0` or “Don’t build anything”. *(Confirm in dashboard.)*
+- [x] **4.3** Merged via [https://github.com/topasiaedu/community-auto-scheduler/pull/2](https://github.com/topasiaedu/community-auto-scheduler/pull/2).
+- [x] **4.4** Merge to `main` triggered production Actions — run `32943809514`.
+- [x] **4.5** Latest production deploy is Actions/CLI: `https://community-auto-scheduler-i02rek8cg-topasiaedus-projects.vercel.app` (`READY`, prebuilt). Aliased to `https://community-auto-scheduler-web.vercel.app`.
+- [x] **4.6** Production domain HTTP 200 / `READY`.
+- [x] **4.7** Confirm no red native **Vercel** Git check blocks future PRs. Require the **Vercel Preview** workflow check instead (Phase 6).
 
 ---
 
 ## Phase 5 — Stay private (already done) + prove personal accounts
 
 - [x] **5.1** Repo is **Private**.
-- [ ] **5.2** From a **personal** GitHub account with repo access, open a PR. Confirm preview job green + URL comment.
-- [ ] **5.3** From that account, merge to `main`. Confirm a single production deploy via Actions succeeds.
-- [ ] **5.4** If 5.2 and 5.3 pass, personal commit emails no longer block web deploys.
+- [x] **5.2** From a **personal** GitHub account with repo access, open a PR. Confirm preview job green + URL comment.
+- [x] **5.3** From that account, merge to `main`. Confirm a single production deploy via Actions succeeds.
+- [x] **5.4** If 5.2 and 5.3 pass, personal commit emails no longer block web deploys.
 
 ---
 
 ## Phase 6 — Lock it down
+
+> **Deferred (2026-08-26)** — owner will do later. Day-to-day Actions deploys do not require this yet.
 
 - [ ] **6.1** Branch protection on `main`: require a pull request before merging.
 - [ ] **6.2** Require the **Vercel Preview** workflow status check to pass.
@@ -215,16 +213,18 @@ If Actions fails, keep using native Git and fix secrets/token scope before Phase
 - [ ] **6.6** Turn on **Deployment Protection** for Preview environments in Vercel project settings (previews stay URL-reachable even when the repo is private).
 - [ ] **6.7** Schedule `VERCEL_TOKEN` rotation; rotate when a repo admin leaves.
 - [ ] **6.8** Review who has access to repository secrets.
-- [ ] **6.9** Keep Render `WEB_ORIGIN` limited to known production (and any approved preview) origins.
+- [ ] **6.9** Keep API `WEB_ORIGIN` limited to known production (and any approved preview) origins.
 
 ---
 
 ## Phase 7 — Handover to developers
 
+> **Deferred (2026-08-26)** — owner will do later.
+
 - [ ] **7.1** Workflow unchanged: personal GitHub account, personal commit email, normal push and PR.
 - [ ] **7.2** Preview URLs arrive as a **workflow comment on the PR**, not from the Vercel bot.
 - [ ] **7.3** Branches in the repo, not forks.
-- [ ] **7.4** API/CORS: if preview API calls fail, ask an admin to update Render `WEB_ORIGIN` (or use protected production testing).
+- [ ] **7.4** API/CORS: if preview API calls fail, ask an admin to update `WEB_ORIGIN` (or use protected production testing).
 - [ ] **7.5** Optionally align commit identity for attribution (not required for deploys):
 
 ```powershell
@@ -340,10 +340,10 @@ The API on Render is **out of scope** for these workflows. Render continues to d
 | 1 — Credentials + `vercel link`      | agent; you finish 1.2 / 1.3      | 2026-08-26 | [~]  |
 | 2 — GitHub secrets + Vercel `VITE_*` | you                              |            | [ ]  |
 | 3 — Prove Actions                    |                                  |            | [ ]  |
-| 4 — Confirm cutover                  |                                  |            | [ ]  |
-| 5 — Prove personal accounts          |                                  |            | [ ]  |
-| 6 — Lock it down                     |                                  |            | [ ]  |
-| 7 — Developer handover               |                                  |            | [ ]  |
+| 4 — Confirm cutover                  | agent; you confirm 4.2 / 4.7     | 2026-08-26 | [~]  |
+| 5 — Prove personal accounts          | proven via PR #1 (KWen-22)       | 2026-08-26 | [x]  |
+| 6 — Lock it down                     | deferred                         | 2026-08-26 | [ ]  |
+| 7 — Developer handover               | deferred                         | 2026-08-26 | [ ]  |
 
 
 **Success criteria:** a developer using a personal Gmail or Yahoo GitHub account opens a PR against this **private** repo, receives a working preview URL comment, merges to `main`, and the Vercel production web app updates via Actions — without buying extra Vercel seats. Render API + Supabase keep working independently.

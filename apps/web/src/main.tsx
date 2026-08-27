@@ -17,14 +17,14 @@ if (rootElement === null) {
 
 function Root(): ReactElement {
   return (
-    <NmcasVmProvider>
-      <BrowserRouter>
+    <BrowserRouter>
+      <NmcasVmProvider>
         <TooltipProvider>
           <App />
           <Toaster richColors position="bottom-right" />
         </TooltipProvider>
-      </BrowserRouter>
-    </NmcasVmProvider>
+      </NmcasVmProvider>
+    </BrowserRouter>
   );
 }
 

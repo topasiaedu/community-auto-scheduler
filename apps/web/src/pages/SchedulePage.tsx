@@ -22,6 +22,13 @@ export function SchedulePage(): ReactElement {
     document.title = "Schedule · NMCAS";
   }, []);
 
+  useEffect(() => {
+    if (vm.editingDraftId !== null && mode !== "single") {
+      setMode("single");
+      writeScheduleMode("single");
+    }
+  }, [vm.editingDraftId, mode]);
+
   const onModeChange = (next: SchedulePageMode): void => {
     setMode(next);
     writeScheduleMode(next);

@@ -4,6 +4,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import type { Session } from "@supabase/supabase-js";
 import { isUtcIsoAtLeastSecondsAhead, mytLocalToUtcIso, utcIsoToDatetimeLocalMyt } from "../myt.js";
@@ -14,6 +15,7 @@ import {
   readStoredProjectId,
 } from "../lib/api.js";
 import { buildNewScheduleBody, buildPatchDraftBody, type ScheduleFormFields } from "../lib/scheduleBuilders.js";
+import { writeScheduleMode } from "../lib/scheduleMode.js";
 import {
   dedupeWaGroupsByJid,
   defaultScheduleTime,
@@ -33,6 +35,7 @@ import {
 } from "../types/models.js";
 
 export function useNmcasApp() {
+  const navigate = useNavigate();
   const supabase = useMemo(() => getBrowserSupabase(), []);
   const [session, setSession] = useState<Session | null>(null);
   const sessionRef = useRef<Session | null>(null);
@@ -708,6 +711,12 @@ export function useNmcasApp() {
     setFormError(null);
   }, [clearPostImage]);
 
+  /** Open the single-message schedule form for draft resume / pending edit. */
+  const goToScheduleForDraft = useCallback(() => {
+    writeScheduleMode("single");
+    navigate("/schedule");
+  }, [navigate]);
+
   const onGroupSelect = (jid: string) => {
     setGroupJid(jid);
     const g = groups.find((x) => x.jid === jid);
@@ -938,6 +947,7 @@ export function useNmcasApp() {
       loadFormFromMessage(m);
       setEditingDraftId(m.id);
       refreshMessages();
+      goToScheduleForDraft();
     })();
   };
 
@@ -999,6 +1009,7 @@ export function useNmcasApp() {
     }
     loadFormFromMessage(m);
     setEditingDraftId(m.id);
+    goToScheduleForDraft();
   };
 
   const onSubmitAuth = (ev: FormEvent) => {

@@ -257,7 +257,11 @@ export class WaManager {
   /** Debounced auto-repair after QR channel timeout / error (no manual reset required). */
   private qrRepairTimer: ReturnType<typeof setTimeout> | undefined;
 
+  /** Caps auto QR repair so we do not loop forever when WhatsApp never emits a QR. */
+  private qrRepairAttempts: number = 0;
+
   private static readonly GROUP_CACHE_TTL_MS = 5 * 60_000;
+  private static readonly MAX_QR_REPAIR_ATTEMPTS = 3;
 
   /** Was 60s; 8MB session re-read every minute caused avoidable heap spikes on 512MB. */
   private static readonly PERSIST_INTERVAL_MS = 5 * 60_000;
@@ -808,7 +812,9 @@ export class WaManager {
   private async performResetSessionForLinking(): Promise<void> {
     this.stopPersistTimer();
     this.stopGroupsRefreshLoop();
+    this.cancelQrRepairTimer();
     this.lastPersistMeta = undefined;
+    this.qrRepairAttempts = 0;
     const existing = this.client;
     this.client = undefined;
     this.latestQr = undefined;
@@ -829,7 +835,8 @@ export class WaManager {
       await sleep(500);
     }
     await wipeWhatsAppStore(this.prisma, this.env, this.projectId);
-    await this.ensureRunning();
+    /** After an operator reset, always open QR under free RAM (skip stored-session reconnect). */
+    await this.openFreshQrPairing();
   }
 
   private async ensureRunning(): Promise<void> {
@@ -932,13 +939,34 @@ export class WaManager {
   }
 
   private attachClientEvents(client: WhatsmeowClient): void {
-    client.on("qr", ({ code }) => {
+    client.on("log", (entry) => {
+      const level = typeof entry.level === "string" ? entry.level : "info";
+      const msg = typeof entry.msg === "string" ? entry.msg : JSON.stringify(entry);
+      console.info(`[whatsmeow projectId=${this.projectId}] [${level}] ${msg}`);
+    });
+
+    client.on("qr", (payload) => {
+      const code =
+        typeof payload === "object" &&
+        payload !== null &&
+        "code" in payload &&
+        typeof (payload as { code: unknown }).code === "string"
+          ? (payload as { code: string }).code
+          : "";
+      console.info(
+        `[WaManager] qr event projectId=${this.projectId} codeLen=${String(code.length)}`,
+      );
+      if (code.length === 0) {
+        this.lastError = "Received empty QR payload from WhatsApp";
+        return;
+      }
       this.latestQr = code;
       this.uiState = "connecting";
       this.qrPairingActive = true;
+      this.qrRepairAttempts = 0;
       this.lastError = undefined;
+      this.bootPhase = "awaiting_scan";
       this.cancelQrRepairTimer();
-      // QR linking is the operator flow; reconnect backoff is not relevant.
       this.cancelReconnectTimer();
     });
 
@@ -949,6 +977,17 @@ export class WaManager {
       this.lastError = "QR timed out — retrying automatically…";
       this.uiState = "disconnected";
       console.warn(`[WaManager] QR channel timed out projectId=${this.projectId}`);
+      this.cancelReconnectTimer();
+      /** Kill the Go process immediately so the next attempt is not RAM-starved. */
+      const dying = this.client;
+      this.client = undefined;
+      if (dying !== undefined) {
+        try {
+          dying.close();
+        } catch {
+          /* ignore */
+        }
+      }
       this.scheduleQrRepair("qr_timeout");
     });
 
@@ -959,6 +998,16 @@ export class WaManager {
       this.lastError = `QR error: ${payload.event} — retrying automatically…`;
       console.error(`[WaManager] QR error projectId=${this.projectId} event=${payload.event}`);
       this.uiState = "disconnected";
+      this.cancelReconnectTimer();
+      const dying = this.client;
+      this.client = undefined;
+      if (dying !== undefined) {
+        try {
+          dying.close();
+        } catch {
+          /* ignore */
+        }
+      }
       this.scheduleQrRepair(`qr_error_${payload.event}`);
     });
 
@@ -967,6 +1016,7 @@ export class WaManager {
       this.latestQr = undefined;
       this.qrPairingActive = false;
       this.loggedInWaitFailures = 0;
+      this.qrRepairAttempts = 0;
       this.lastError = undefined;
       this.bootPhase = undefined;
       this.cancelQrRepairTimer();
@@ -1341,10 +1391,21 @@ export class WaManager {
   }
 
   /**
-   * After QR channel timeout/error, wipe and re-boot so operators are not stuck on manual reset.
+   * After QR channel timeout/error, wipe and open a fresh QR client (RAM freed first).
+   * Stops after {@link WaManager.MAX_QR_REPAIR_ATTEMPTS} so the UI is not stuck forever.
    */
   private scheduleQrRepair(reason: string): void {
     if (this.isShuttingDown || this.isLoggedOut) {
+      return;
+    }
+    if (this.qrRepairAttempts >= WaManager.MAX_QR_REPAIR_ATTEMPTS) {
+      this.lastError =
+        "QR never arrived after several tries. Use Link with phone number below, or set WA_MAX_WARM_CLIENTS=1 on the server.";
+      this.uiState = "disconnected";
+      this.bootPhase = undefined;
+      console.error(
+        `[WaManager] QR repair exhausted projectId=${this.projectId} attempts=${String(this.qrRepairAttempts)} reason=${reason}`,
+      );
       return;
     }
     this.cancelQrRepairTimer();
@@ -1356,7 +1417,10 @@ export class WaManager {
           if (client !== undefined && (await this.safeIsLoggedIn(client))) {
             return;
           }
-          console.warn(`[WaManager] QR repair projectId=${this.projectId} reason=${reason}`);
+          this.qrRepairAttempts += 1;
+          console.warn(
+            `[WaManager] QR repair projectId=${this.projectId} reason=${reason} attempt=${String(this.qrRepairAttempts)}`,
+          );
           this.latestQr = undefined;
           this.qrPairingActive = false;
           this.uiState = "disconnected";
@@ -1366,7 +1430,8 @@ export class WaManager {
             this.client = undefined;
           }
           await wipeWhatsAppStore(this.prisma, this.env, this.projectId);
-          await this.boot();
+          /** Always spawn QR under free RAM — never reuse a client created under pressure. */
+          await this.openFreshQrPairing();
         })
         .catch((err: unknown) => {
           this.bootPhase = undefined;
@@ -1393,7 +1458,7 @@ export class WaManager {
     if (this.isShuttingDown || this.isLoggedOut) {
       return;
     }
-    if (this.isQrLinkInProgress()) {
+    if (this.isQrLinkInProgress() || this.qrRepairTimer !== undefined) {
       return;
     }
     if (this.reconnectTimer !== undefined) {
@@ -1457,6 +1522,7 @@ export class WaManager {
       if (loggedIn) {
         this.uiState = "connected";
         this.loggedInWaitFailures = 0;
+        this.qrRepairAttempts = 0;
         this.bootPhase = undefined;
         this.startPersistTimer();
         this.ensureGroupsRefreshLoop();
@@ -1464,7 +1530,6 @@ export class WaManager {
         return;
       }
 
-      // Dead / revoked session: must recreate the Go client after wipe (see waQrPairing).
       const deadPlan = planPairingAfterDeadStoredSession();
       console.warn(
         `[WaManager] stored session unusable projectId=${this.projectId}; plan=${deadPlan}`,
@@ -1473,40 +1538,142 @@ export class WaManager {
       await this.disposeClientQuietly(client);
       this.client = undefined;
       await wipeWhatsAppStore(this.prisma, this.env, this.projectId);
-
-      await hydrateWhatsAppSessionFromBlob(this.prisma, this.env, this.projectId);
-      const freshStore = resolveWhatsAppStoreUri(this.env, this.projectId);
-      const fresh = createClient({
-        store: freshStore,
-        commandTimeout: WHATSAPP_COMMAND_TIMEOUT_MS,
-      });
-      this.attachClientEvents(fresh);
-      this.client = fresh;
-      this.bootPhase = "init_fresh";
-      await withTimeout(fresh.init(), 40_000, "fresh.client.init");
-      await this.beginQrPairing(fresh);
+      await this.openFreshQrPairing();
       return;
     }
 
-    await this.beginQrPairing(client);
+    /**
+     * No stored JID — still dispose this client and re-spawn AFTER freeing RAM.
+     * Spawning Go under memory pressure is why `awaiting_scan` never emits `qr`.
+     */
+    await this.disposeClientQuietly(client);
+    this.client = undefined;
+    await this.openFreshQrPairing();
   }
 
   /**
-   * Frees RAM (via pool callback), opens the QR channel, and connects.
-   * Marks pairing active before any await so `/wa/status` shows progress.
+   * QR pairing under free RAM: evict other warm clients first, then spawn a fresh Go process.
+   * Never call `getQRChannel` on a client that was `init()`'d while other clients were warm.
    */
-  private async beginQrPairing(client: WhatsmeowClient): Promise<void> {
+  private async openFreshQrPairing(): Promise<void> {
     this.bootPhase = "prepare_ram";
     this.markQrPairingActive();
     if (this.onBeforeQrPairing !== undefined) {
       await this.onBeforeQrPairing();
     }
     this.markQrPairingActive();
+
+    /** Ensure no leftover client/process before spawning. */
+    const existing = this.client;
+    if (existing !== undefined) {
+      await this.disposeClientQuietly(existing);
+      this.client = undefined;
+    }
+
+    await sleep(500);
+
+    this.bootPhase = "create_client_qr";
+    const store = resolveWhatsAppStoreUri(this.env, this.projectId);
+    const client = createClient({
+      store,
+      commandTimeout: WHATSAPP_COMMAND_TIMEOUT_MS,
+    });
+    this.attachClientEvents(client);
+    this.client = client;
+
+    this.bootPhase = "init_qr";
+    const initResult = await withTimeout(client.init(), 40_000, "qr.client.init");
+    if (planPairingAfterInit(initResult.jid) === "connect_stored_session") {
+      console.warn(
+        `[WaManager] unexpected JID after wipe during QR open projectId=${this.projectId}; wiping again`,
+      );
+      await this.disposeClientQuietly(client);
+      this.client = undefined;
+      await wipeWhatsAppStore(this.prisma, this.env, this.projectId);
+      await sleep(300);
+      const retry = createClient({
+        store: resolveWhatsAppStoreUri(this.env, this.projectId),
+        commandTimeout: WHATSAPP_COMMAND_TIMEOUT_MS,
+      });
+      this.attachClientEvents(retry);
+      this.client = retry;
+      await withTimeout(retry.init(), 40_000, "qr.client.init.retry");
+      this.bootPhase = "qr_channel";
+      await retry.getQRChannel();
+      this.bootPhase = "qr_connect";
+      await retry.connect();
+      this.bootPhase = "awaiting_scan";
+      return;
+    }
+
     this.bootPhase = "qr_channel";
     await client.getQRChannel();
     this.bootPhase = "qr_connect";
     await client.connect();
     this.bootPhase = "awaiting_scan";
+    console.info(`[WaManager] QR channel open projectId=${this.projectId}; waiting for qr event`);
+  }
+
+  /**
+   * Phone-number pairing fallback when QR never emits (common on low-RAM hosts).
+   * WhatsApp → Linked devices → Link with phone number → enter the returned code.
+   */
+  async requestPairCode(phone: string): Promise<string> {
+    const cleaned = phone.replace(/[^\d]/g, "");
+    if (cleaned.length < 8 || cleaned.length > 15) {
+      throw new Error("Phone must be digits only, country code included (no +)");
+    }
+    let issuedCode = "";
+    this.waOpChain = this.waOpChain
+      .then(async () => {
+        issuedCode = await this.performRequestPairCode(cleaned);
+      })
+      .catch((err: unknown) => {
+        console.error("[WaManager] pairCode chain failed:", err);
+        throw err;
+      });
+    await this.waOpChain;
+    if (issuedCode.length === 0) {
+      throw new Error("Pairing code was not generated");
+    }
+    return issuedCode;
+  }
+
+  private async performRequestPairCode(phoneDigits: string): Promise<string> {
+    this.cancelQrRepairTimer();
+    this.latestQr = undefined;
+    this.bootPhase = "pair_code_prepare";
+    this.markQrPairingActive();
+    if (this.onBeforeQrPairing !== undefined) {
+      await this.onBeforeQrPairing();
+    }
+
+    const existing = this.client;
+    if (existing !== undefined) {
+      await this.disposeClientQuietly(existing);
+      this.client = undefined;
+    }
+    await wipeWhatsAppStore(this.prisma, this.env, this.projectId);
+    await sleep(500);
+
+    const client = createClient({
+      store: resolveWhatsAppStoreUri(this.env, this.projectId),
+      commandTimeout: WHATSAPP_COMMAND_TIMEOUT_MS,
+    });
+    this.attachClientEvents(client);
+    this.client = client;
+    this.bootPhase = "pair_code_init";
+    await withTimeout(client.init(), 40_000, "pairCode.client.init");
+    /** Phone pairing requires connect() first — do not open a QR channel. */
+    this.bootPhase = "pair_code_connect";
+    this.uiState = "connecting";
+    await client.connect();
+    this.bootPhase = "pair_code_request";
+    const code = await withTimeout(client.pairCode(phoneDigits), 30_000, "pairCode");
+    this.bootPhase = "awaiting_pair_code";
+    this.lastError = undefined;
+    console.info(`[WaManager] pairCode issued projectId=${this.projectId}`);
+    return code;
   }
 
   private startPersistTimer(): void {

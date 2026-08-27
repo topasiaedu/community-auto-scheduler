@@ -83,4 +83,30 @@ export function registerWaRoutes(app: FastifyInstance, waPool: WaConnectionPool)
       return reply.code(500).send({ ok: false as const, error: message });
     }
   });
+
+  /**
+   * Phone-number pairing fallback when QR never appears.
+   * Body: `{ "phone": "60123456789" }` (digits only, country code, no +).
+   */
+  app.post("/wa/pair-code", async (req: FastifyRequest, reply: FastifyReply) => {
+    const projectId = requireActiveProjectId(req, reply);
+    if (projectId === undefined) {
+      return;
+    }
+    const body = req.body as { phone?: unknown } | null;
+    const phone = typeof body?.phone === "string" ? body.phone.trim() : "";
+    if (phone.length === 0) {
+      return reply.code(400).send({ error: "phone is required (digits with country code, no +)" });
+    }
+    const wa = waPool.getManager(projectId);
+    try {
+      await waPool.prepareForQrPairing(projectId);
+      const code = await wa.requestPairCode(phone);
+      return { code };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Pairing code request failed";
+      console.error(`[wa/pair-code] projectId=${projectId}:`, err);
+      return reply.code(500).send({ error: message });
+    }
+  });
 }

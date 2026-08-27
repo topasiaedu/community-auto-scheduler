@@ -37,6 +37,12 @@ export function WhatsAppSection({ vm }: WhatsAppSectionProps): ReactElement | nu
     waConnected,
     groupsLoading,
     groupsError,
+    pairPhone,
+    setPairPhone,
+    pairCode,
+    pairCodeSubmitting,
+    pairCodeError,
+    requestWaPairCode,
   } = vm;
 
   if (!canUseApiRoutes) {
@@ -102,6 +108,44 @@ export function WhatsAppSection({ vm }: WhatsAppSectionProps): ReactElement | nu
               <Button onClick={() => void refreshWa()} className="mt-1">
                 {waConnecting ? "Checking status…" : "Refresh status"}
               </Button>
+              <Separator />
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-foreground">Or link with phone number</p>
+                <p className="text-xs text-muted-foreground">
+                  Use this if the QR never appears. Enter the WhatsApp number with country code, no +
+                  (example: 60123456789).
+                </p>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <input
+                    type="tel"
+                    inputMode="numeric"
+                    autoComplete="tel"
+                    placeholder="60123456789"
+                    value={pairPhone}
+                    onChange={(e) => setPairPhone(e.target.value)}
+                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm sm:max-w-[200px]"
+                    disabled={pairCodeSubmitting}
+                  />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    disabled={pairCodeSubmitting}
+                    onClick={() => void requestWaPairCode()}
+                  >
+                    {pairCodeSubmitting ? "Requesting…" : "Get pairing code"}
+                  </Button>
+                </div>
+                {pairCodeError !== null ? (
+                  <p className="text-xs text-destructive">{pairCodeError}</p>
+                ) : null}
+                {pairCode !== null ? (
+                  <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2">
+                    <p className="text-xs text-emerald-800">Enter this code in WhatsApp → Linked devices → Link with phone number:</p>
+                    <p className="mt-1 font-mono text-lg font-semibold tracking-widest text-emerald-900">{pairCode}</p>
+                  </div>
+                ) : null}
+              </div>
               <Separator />
               {!resetSessionConfirming ? (
                 <button

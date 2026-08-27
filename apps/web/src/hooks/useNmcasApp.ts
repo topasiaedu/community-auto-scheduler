@@ -93,6 +93,10 @@ export function useNmcasApp() {
   const [pollOptions, setPollOptions] = useState<string[]>(["", ""]);
   const [pollMultiSelect, setPollMultiSelect] = useState(false);
   const [sessionResetting, setSessionResetting] = useState(false);
+  const [pairPhone, setPairPhone] = useState("");
+  const [pairCode, setPairCode] = useState<string | null>(null);
+  const [pairCodeSubmitting, setPairCodeSubmitting] = useState(false);
+  const [pairCodeError, setPairCodeError] = useState<string | null>(null);
   const [resetSessionConfirming, setResetSessionConfirming] = useState(false);
   const [cancelConfirmId, setCancelConfirmId] = useState<string | null>(null);
 
@@ -518,6 +522,8 @@ export function useNmcasApp() {
       return;
     }
     setSessionResetting(true);
+    setPairCode(null);
+    setPairCodeError(null);
     try {
       const res = await authorizedFetch("/wa/session/reset", { method: "POST" });
       const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
@@ -532,6 +538,43 @@ export function useNmcasApp() {
       setSessionResetting(false);
     }
   }, [authorizedFetch, refreshQrFromServer, refreshWa, selectedProjectId]);
+
+  /**
+   * Requests an 8-digit WhatsApp pairing code (fallback when QR never appears).
+   */
+  const requestWaPairCode = useCallback(async () => {
+    if (sessionRef.current === null || selectedProjectId.length === 0) {
+      return;
+    }
+    const phone = pairPhone.trim();
+    if (phone.length === 0) {
+      setPairCodeError("Enter the WhatsApp phone number with country code (digits only)");
+      return;
+    }
+    setPairCodeSubmitting(true);
+    setPairCodeError(null);
+    setPairCode(null);
+    try {
+      const res = await authorizedFetch("/wa/pair-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { code?: string; error?: string };
+      if (!res.ok || typeof body.code !== "string" || body.code.length === 0) {
+        setPairCodeError(
+          typeof body.error === "string" ? body.error : `Pairing failed (${String(res.status)})`,
+        );
+        return;
+      }
+      setPairCode(body.code);
+      refreshWa();
+    } catch {
+      setPairCodeError("Could not reach the API for pairing code");
+    } finally {
+      setPairCodeSubmitting(false);
+    }
+  }, [authorizedFetch, pairPhone, refreshWa, selectedProjectId]);
 
   const onClickResetSession = () => {
     setResetSessionConfirming(true);
@@ -1131,6 +1174,12 @@ export function useNmcasApp() {
     setPollMultiSelect,
     sessionResetting,
     resetSessionConfirming,
+    pairPhone,
+    setPairPhone,
+    pairCode,
+    pairCodeSubmitting,
+    pairCodeError,
+    requestWaPairCode,
     cancelConfirmId,
     requestCancelMessage,
     dismissCancelConfirm,

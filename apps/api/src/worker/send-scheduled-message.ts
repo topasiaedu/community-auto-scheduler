@@ -27,6 +27,7 @@ import {
   buildNoReceiptErrorMessage,
   noReceiptTimeoutUpdateWhere,
 } from "../lib/waReceipt.js";
+import { toWhatsAppUserJid } from "../lib/notifyMsisdn.js";
 import { parseSendScheduledMessageJobData, type SendScheduledMessageJobData } from "../types/send-scheduled-message.js";
 
 const MAX_ERROR_LEN = 2000;
@@ -105,7 +106,7 @@ function isStickerPath(objectPath: string): boolean {
 }
 
 /**
- * Sends a single ops alert on the same project's WhatsApp client.
+ * Sends an ops alert DM on the same project's WhatsApp client to every notify MSISDN.
  */
 async function sendFailureWhatsAppAlert(
   env: ApiEnv,
@@ -113,8 +114,10 @@ async function sendFailureWhatsAppAlert(
   row: ScheduledMessage,
   errorMessage: string,
 ): Promise<void> {
-  const msisdn = env.NMCAS_FAILURE_NOTIFY_MSISDN;
-  const jid = `${msisdn}@s.whatsapp.net`;
+  const msisdns = env.NMCAS_FAILURE_NOTIFY_MSISDN;
+  if (msisdns.length === 0) {
+    return;
+  }
   try {
     await waPool.start(row.projectId);
     if (!(await waPool.isSendReady(row.projectId))) {
@@ -123,14 +126,20 @@ async function sendFailureWhatsAppAlert(
     const wa = waPool.getManager(row.projectId);
     const whenMyt = formatScheduledAtMyt(row.scheduledAt);
     const text = `[NMCAS] Failed to send scheduled message to ${row.groupName} at ${whenMyt} MYT. Error: ${truncateForNotifyBody(errorMessage)}`;
-    await wa.sendDirectText(jid, text);
+    for (const msisdn of msisdns) {
+      try {
+        await wa.sendDirectText(toWhatsAppUserJid(msisdn), text);
+      } catch {
+        /* ignore per-recipient — other numbers should still get the alert */
+      }
+    }
   } catch {
     /* ignore — do not fail the job handler because alert delivery failed */
   }
 }
 
 /**
- * Persists `FAILED` and pings the configured MSISDN on WhatsApp for that project.
+ * Persists `FAILED` and pings every configured notify MSISDN on WhatsApp for that project.
  */
 async function markFailedWithNotify(
   prisma: PrismaClient,

@@ -46,7 +46,7 @@ Render sets **`PORT`**; the API already listens on `process.env.PORT`.
 | `SUPABASE_ANON_KEY` | `anon` `public` key (JWT verification). |
 | `SUPABASE_SERVICE_ROLE_KEY` | **Secret** — Storage (post images) server-side. |
 | `NMCAS_POST_MEDIA_BUCKET` | Private bucket name. |
-| `NMCAS_FAILURE_NOTIFY_MSISDN` | Optional; digits-only MSISDN for failure alerts. |
+| `NMCAS_FAILURE_NOTIFY_MSISDN` | Optional; one MSISDN or comma-separated list for failure alerts and the daily digest. Defaults include `60139968817` and `60176782206`. |
 
 Optional: `DIRECT_URL` only if you later add Prisma `directUrl` for migrations behind PgBouncer (not required for typical Supabase session URL).
 

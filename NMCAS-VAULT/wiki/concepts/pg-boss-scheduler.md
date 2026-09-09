@@ -1,8 +1,8 @@
 ---
 title: "pg-boss job scheduler"
 type: "concept"
-updated: "2026-04-21"
-sources: 3
+updated: "2026-09-09"
+sources: 4
 tags: ["scheduling", "pg-boss", "postgres", "nmcas"]
 ---
 
@@ -27,9 +27,9 @@ tags: ["scheduling", "pg-boss", "postgres", "nmcas"]
 2. API saves the `ScheduledMessage` row (`status: PENDING`) and creates a pg-boss job via `boss.sendAfter(queue, { scheduledMessageId }, {}, scheduledAt)`. The returned `jobId` is stored on the row as `pgBossJobId`.
 3. At fire time, pg-boss calls the worker function registered via `boss.work(queue, handler)`.
 4. Worker reads the row, does a CAS `PENDING → SENDING` via `updateMany { WHERE status='PENDING' }` (PostgreSQL row-level lock — only one concurrent job can win).
-5. Worker sends via the project's Baileys socket.
-6. On success: `updateMany { WHERE status='SENDING' }` → `SENT`.
-7. On WA error: `markFailedWithNotify` → `FAILED` + optional WhatsApp DM to `NMCAS_FAILURE_NOTIFY_MSISDN`.
+5. Worker sends via the project's WhatsApp client (whatsmeow-node).
+6. IPC success stores `waMessageId` and keeps `SENDING`. `SENT` waits for `message:receipt` (server ack). No receipt → `FAILED`. Queue Sent is **not** proof the community can see the post ([[wiki/sources/2026-09-09-starting-soon-false-sent-rdw6]]).
+7. On WA / timeout error: `markFailedWithNotify` → `FAILED` + WhatsApp DMs to every `NMCAS_FAILURE_NOTIFY_MSISDN` (defaults: `60139968817` and `60176782206`).
 
 ## Free-tier tuning (index.ts)
 
@@ -79,10 +79,12 @@ All jobs are one-off. Recurring scheduling is out of scope for V1.
 - Grounded in: `raw/sources/2026-04-13-nmcas-prd-v1.md`
 - Implementation snapshot: `raw/sources/2026-04-18-nmcas-implementation-snapshot.md`
 - Stability hardening: `raw/sources/2026-04-21-stability-hardening-session.md`
+- False SENT vs visible: `raw/sources/2026-09-09-starting-soon-false-sent-rdw6.md`
 
 ## See also
 
 - [[wiki/concepts/wa-connection-pool]]
 - [[wiki/entities/scheduled-message]]
 - [[wiki/sources/2026-04-21-stability-hardening-session]]
+- [[wiki/sources/2026-09-09-starting-soon-false-sent-rdw6]]
 - [[wiki/overview]]

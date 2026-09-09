@@ -1,8 +1,8 @@
 ---
 title: "NMCAS vault overview"
 type: "overview"
-updated: "2026-08-27"
-sources: 12
+updated: "2026-09-09"
+sources: 13
 tags: ["nmcas", "meta"]
 ---
 
@@ -27,6 +27,8 @@ See [[wiki/concepts/value-vs-reminder-messages]], [[wiki/sources/2026-07-08-p7-c
 - **Value post** — fresh copy; schedule via **Single message** (image+caption / poll / text); **new** sends fan out to active communities’ Announcements channels; **Queue draft Resume** publishes that one row via PATCH ([[wiki/sources/2026-08-27-queue-draft-resume-imageurl-session]])
 - **Reminder** — SOP Show Up playbook; **Campaign** wizard schedules one community’s reminder sequence; IMAGE slots use long SOP captions; LIVE NOW = TEXT; post-live sticker optional until WebP uploaded
 - Legacy **Post** / **Poll** rows still send via worker fallback
+
+Queue **Sent** means WhatsApp **server receipt**, not proof the community can see the post ([[wiki/sources/2026-09-09-starting-soon-false-sent-rdw6]]).
 
 ### Earlier DB enums
 
@@ -65,7 +67,7 @@ See [[wiki/sources/2026-04-13-nmcas-prd-v1]] for full requirements. Out of scope
 | P2 | Post type end-to-end; WA link path stable — **complete** (see [[wiki/sources/2026-04-17-wa-p2-api-stability]]) |
 | P3 | Poll type — **complete** (`POST /messages` with `type: "POLL"`, worker `sendPollToWhatsApp`) |
 | P4 | Multi-project (connection pool, project switcher) — **complete** (see [[wiki/sources/2026-04-18-nmcas-implementation-snapshot]]) |
-| P5 | Failure notifications, live status, mobile responsive — **partial** (failure DM to one MSISDN; Re-queue button + FAILED confirmation dialog 2026-04-21; HTTP polling; UI overhaul deferred) |
+| P5 | Failure notifications, live status, mobile responsive — **partial** (failure + digest DMs to default ops MSISDNs `60139968817` and `60176782206`; Re-queue button + FAILED confirmation dialog 2026-04-21; HTTP polling; UI overhaul deferred) |
 | P6 | Hardening, deployment, env config — **substantially complete** (rescue sweep, duplicate-send fix, race guards, 2026-04-21; Docker + Vercel + Render live 2026-07; see [[wiki/sources/2026-04-21-stability-hardening-session]], [[wiki/sources/2026-07-06-whatsmeow-deploy-product-ux-session]]) |
 | P7 | Value / Reminder + campaign scheduler — **shipped on main** `8f7d1c1` (2026-07-08); live E2E pending deploy/migration ([[wiki/sources/2026-07-08-p7-campaign-scheduler-ship-session]], [[wiki/analysis/p7-implementation-plan]], [[wiki/analysis/p7-ux-spec]]) |
 
@@ -91,3 +93,4 @@ See [[wiki/sources/2026-04-13-nmcas-prd-v1]] for full requirements. Out of scope
 - [[wiki/sources/2026-08-27-wa-qr-pairing-do512-incident-session]]
 - [[wiki/sources/2026-08-27-wa-qr-client-outdated-whatsmeow-upgrade]]
 - [[wiki/sources/2026-08-27-queue-draft-resume-imageurl-session]]
+- [[wiki/sources/2026-09-09-starting-soon-false-sent-rdw6]]

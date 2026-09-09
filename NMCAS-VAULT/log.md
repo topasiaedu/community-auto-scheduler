@@ -138,3 +138,23 @@ Append-only timeline of ingests, filed queries, and lint passes. Newest entries 
 - Raw: `raw/sources/2026-08-27-queue-draft-resume-imageurl-session.md`
 - Wiki: [[wiki/sources/2026-08-27-queue-draft-resume-imageurl-session]], [[wiki/entities/scheduled-message]], [[wiki/concepts/value-vs-reminder-messages]], [[wiki/overview]], [[index]]
 - Notes: Resume stayed on Queue (no navigate / single mode); then Schedule fan-out POSTed drafts and hit `posts/{projectId}/` check. Fixes `205569d` (navigate) and `9f71e25` (PATCH draft, no fan-out while editing). New Value fan-out still needs path under active project.
+
+## [2026-09-09] query | Starting Soon marked SENT but not in community
+- Question: RDW 6.0 Starting Soon 8 Sep 2026 11:00 MYT shows Sent successful, but the community did not receive it. Investigate without sending.
+- Answer filed: not filed
+- Notes: Campaign row `cmtl2qhgq00cwe7o76apvbflk` is SENT with waMessageId `3EB08C5AE0DFF1EBED3008`; IPC accept 11:00:49 MYT, server receipt +568ms. Same JID as rest of Show Up campaign (`120363408928450031@g.us`, label "RDW 6.0 › RDW 6.0"). Manual retry at 13:00 MYT (`cmts79afk00l2e7o7drpez4d3`) also SENT. UI SENT = WhatsApp server receipt, not member-visible delivery ([[wiki/sources/2026-07-27-wa-reliability-always-on-plan]] D2; Stage C echo not implemented). No messages were sent during this check.
+
+## [2026-09-09] query | Why Starting Soon missed while LIVE NOW / sticker / Value landed
+- Question: LIVE NOW, sticker, and Value posts appeared; 1:05 PM Starting Soon was a phone send. Why did 11:00 Starting Soon not show?
+- Answer filed: not filed
+- Notes: Not a skipped job or wrong group. 11:00 NMCAS send got a server ack; same `04-starting-soon.jpeg` had SENT successfully on earlier RDW campaigns (5.0/4.0/2.0). Caption length ruled out (Value posts ~1900 chars landed in RDW 6.0). NMCAS 13:00 retry also marked SENT at 13:00:07; visible post was the operator phone send at 13:05. Likely WhatsApp dropped that one image stanza after ack; NMCAS cannot tell because Sent does not wait for an echo in the group.
+
+## [2026-09-09] ingest | Starting Soon false SENT — RDW 6.0
+- Raw: `raw/sources/2026-09-09-starting-soon-false-sent-rdw6.md`
+- Wiki: [[wiki/sources/2026-09-09-starting-soon-false-sent-rdw6]], [[wiki/entities/scheduled-message]], [[wiki/concepts/campaign-message-schedule]], [[wiki/concepts/pg-boss-scheduler]], [[wiki/sources/2026-07-27-wa-reliability-always-on-plan]], [[wiki/overview]], [[index]]
+- Notes: 8 Sep 11:00 Starting Soon job ran and got a server receipt; Announcements empty. LIVE NOW / sticker / Value visible. Phone post at 13:05. Stage B implemented; Stage C not. Distinct from Jul 2026 OOM miss.
+
+## [2026-09-09] query | RDW 4.0 Value no-receipt FAILED + add notify contact
+- Question: Failure DM for Reversing Diabetes Workshop 4.0 at 9 Sep 2026 11:00 MYT (`3EB0546133EC6E9CEC1F3D`); check if the community got it; add +6017-678-2206 for this alert type.
+- Answer filed: not filed
+- Notes: Value fan-out image `Jasmine_Post__13_.png`. RDW 4.0 IPC accepted 11:00:49 then no receipt (Go process crash) → FAILED. Operator may have seen it in-group (false FAILED). Same run: base/3.0/5.0/6.0 SENT; RDW 2.0 FAILED with no waMessageId. Do not Re-queue 4.0 if already visible. Code: `DEFAULT_NOTIFY_MSISDNS` now includes `60176782206`.

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { resolveNotifyMsisdns } from "./lib/notifyMsisdn.js";
 
 /** Matches `packages/db/prisma/seed.ts` default project id. */
 export const DEFAULT_PROJECT_ID_VALUE = "nmcas-default-project";
@@ -56,23 +57,14 @@ const EnvSchema = z.object({
    */
   WA_RECEIPT_TIMEOUT_MS: z.coerce.number().int().positive().default(90_000),
   /**
-   * Digits-only MSISDN (e.g. `60139968817` or set `+60139968817` in env; non-digits stripped).
-   * Worker sends one WhatsApp text here when a scheduled message becomes `FAILED`.
+   * Ops WhatsApp DM recipients for FAILED-send alerts and the daily digest.
+   * One MSISDN or a comma/semicolon/whitespace list (e.g. `60139968817,60176782206`).
+   * Parsed to unique digits-only numbers; defaults always include both current ops contacts.
    */
   NMCAS_FAILURE_NOTIFY_MSISDN: z
     .string()
     .optional()
-    .transform((raw) => {
-      const fallback = "60139968817";
-      if (raw === undefined || raw.trim().length === 0) {
-        return fallback;
-      }
-      const digits = raw.replace(/\D/g, "");
-      if (digits.length < 10 || digits.length > 15) {
-        return fallback;
-      }
-      return digits;
-    }),
+    .transform((raw) => resolveNotifyMsisdns(raw)),
   /**
    * Daily WhatsApp ops digest (platform status + today's scheduled messages).
    * Kill-switch: `false` / `0` / `no` / `off`.

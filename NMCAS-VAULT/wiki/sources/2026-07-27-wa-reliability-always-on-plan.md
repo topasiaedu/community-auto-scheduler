@@ -1,7 +1,7 @@
 ---
 title: "WA reliability always-on plan (2026-07-27)"
 type: "source-summary"
-updated: "2026-07-27"
+updated: "2026-09-09"
 sources: 1
 tags: ["nmcas", "whatsmeow", "reliability", "sent", "groups"]
 ---
@@ -33,8 +33,13 @@ Memory: always-on ~80 MB steady; spikes are send/media. Companion prompts: [[wik
 - D5 engagement Phase 4+  
 - D6 prefer always-on over eviction for RAM
 
+## Status vs later incidents
+
+Stage B (store `waMessageId`; `SENT` on `message:receipt`) **is implemented**. Stage C (echo / `isFromMe`) is **not**. Server receipt can still be green Sent while Announcements is empty — [[wiki/sources/2026-09-09-starting-soon-false-sent-rdw6]] (RDW 6.0 Starting Soon 2026-09-08).
+
 ## Related
 
 - [[wiki/concepts/wa-connection-pool]]
 - [[wiki/entities/scheduled-message]]
 - [[wiki/concepts/pg-boss-scheduler]]
+- [[wiki/sources/2026-09-09-starting-soon-false-sent-rdw6]]

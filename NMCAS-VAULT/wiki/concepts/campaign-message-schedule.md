@@ -1,8 +1,8 @@
 ---
 title: "Campaign message schedule (SOP slots)"
 type: "concept"
-updated: "2026-07-16"
-sources: 3
+updated: "2026-09-09"
+sources: 4
 tags: ["nmcas", "sop", "product", "scheduling", "campaign"]
 ---
 
@@ -75,6 +75,10 @@ Seeded on project create (assets uploaded in Settings):
 
 Value Posts are authored fresh per campaign (not templated).
 
+## Operator note: Queue Sent vs visible (2026-09-08)
+
+Starting Soon (day 0 11:00) can show **Sent** in Queue while Announcements has no post. That is **not** the same failure as July 2026 (job never ran / OOM). The worker can store a WhatsApp id and a server receipt and still not be visible. LIVE NOW / Sticker on the same campaign can still land. See [[wiki/sources/2026-09-09-starting-soon-false-sent-rdw6]].
+
 ## Corrections (2026-07-07)
 
 Earlier notes fabricated "10:00 AM / 1 hour before / 2 hours after end". The saved SOP screenshots show the real two-track schedule above. Prior [[wiki/sources/2026-07-06-whatsmeow-deploy-product-ux-session]] §6 timings are superseded.
@@ -86,3 +90,4 @@ Earlier notes fabricated "10:00 AM / 1 hour before / 2 hours after end". The sav
 - [[wiki/analysis/p7-implementation-plan]]
 - [[wiki/entities/scheduled-message]]
 - [[wiki/sources/2026-07-07-whatsapp-community-sop-dr-jasmine-show-up-reference]]
+- [[wiki/sources/2026-09-09-starting-soon-false-sent-rdw6]]

@@ -1,13 +1,14 @@
 /**
  * Daily WhatsApp ops digest: platform status + that day's scheduled messages (MYT).
  *
- * Runs in-process (same API that holds the WA session). Sends a DM to
- * `NMCAS_FAILURE_NOTIFY_MSISDN` via the default project's linked account when ready.
+ * Runs in-process (same API that holds the WA session). Sends a DM to each
+ * `NMCAS_FAILURE_NOTIFY_MSISDN` recipient via a send-ready project's linked account.
  */
 
 import type { PrismaClient } from "@nmcas/db";
 import type { ApiEnv } from "../env.js";
 import type { WaConnectionPool } from "../wa/wa-pool.js";
+import { toWhatsAppUserJid } from "./notifyMsisdn.js";
 import { addMytCalendarDays, mytInstant, todayMytYmd } from "./campaignSchedule.js";
 import { memSampleForJson, sampleMemory } from "./mem-sample.js";
 
@@ -297,12 +298,17 @@ export async function runDailyDigest(
       console.warn("[daily-digest] skipped: no send-ready WhatsApp session");
       return;
     }
-    const msisdn = env.NMCAS_FAILURE_NOTIFY_MSISDN;
-    const jid = `${msisdn}@s.whatsapp.net`;
+    const msisdns = env.NMCAS_FAILURE_NOTIFY_MSISDN;
+    if (msisdns.length === 0) {
+      console.warn("[daily-digest] skipped: no notify MSISDNs");
+      return;
+    }
     const wa = waPool.getManager(sendProjectId);
-    await wa.sendDirectText(jid, text);
+    for (const msisdn of msisdns) {
+      await wa.sendDirectText(toWhatsAppUserJid(msisdn), text);
+    }
     console.warn(
-      `[daily-digest] sent date=${snapshot.dateYmd} projectId=${sendProjectId} messages=${String(snapshot.messages.length)}`,
+      `[daily-digest] sent date=${snapshot.dateYmd} projectId=${sendProjectId} messages=${String(snapshot.messages.length)} recipients=${String(msisdns.length)}`,
     );
   } catch (err: unknown) {
     console.error(

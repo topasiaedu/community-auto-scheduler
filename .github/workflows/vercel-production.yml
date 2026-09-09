@@ -35,6 +35,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
+          cache: npm
 
       # Pin the CLI so a Vercel release cannot break deploys without warning.
       - name: Install Vercel CLI

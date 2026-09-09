@@ -158,3 +158,8 @@ Append-only timeline of ingests, filed queries, and lint passes. Newest entries 
 - Question: Failure DM for Reversing Diabetes Workshop 4.0 at 9 Sep 2026 11:00 MYT (`3EB0546133EC6E9CEC1F3D`); check if the community got it; add +6017-678-2206 for this alert type.
 - Answer filed: not filed
 - Notes: Value fan-out image `Jasmine_Post__13_.png`. RDW 4.0 IPC accepted 11:00:49 then no receipt (Go process crash) → FAILED. Operator may have seen it in-group (false FAILED). Same run: base/3.0/5.0/6.0 SENT; RDW 2.0 FAILED with no waMessageId. Do not Re-queue 4.0 if already visible. Code: `DEFAULT_NOTIFY_MSISDNS` now includes `60176782206`.
+
+## [2026-09-09] query | Vercel Production build failed
+- Question: Production web build failed after the notify-contact push.
+- Answer filed: not filed
+- Notes: GitHub Action `34339582618` failed at `vercel build --prod`: `Installing dependencies with pnpm 10` then `spawn pnpm ENOENT`. Cause: `pnpm-lock.yaml` added in `bebc92c` (same failure 2026-08-27); repo is npm (`package-lock.json`, `vercel.json` `installCommand: npm ci`). Actions runner has no pnpm. Fix: remove `pnpm-lock.yaml`. API on DO was already restarted; this is web-only.

@@ -1,5 +1,8 @@
 node_modules/
 dist/
+# This repo installs with npm (package-lock.json + vercel.json installCommand).
+# A pnpm lockfile makes `vercel build` spawn pnpm, which GitHub Actions does not have.
+pnpm-lock.yaml
 .env
 .env.*
 !.env.example

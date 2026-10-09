@@ -9,6 +9,7 @@ import { z } from "zod";
 import type { PrismaClient } from "@nmcas/db";
 import { SEND_SCHEDULED_MESSAGE_QUEUE } from "../queues.js";
 import { enqueueScheduledMessage } from "../lib/enqueueMessage.js";
+import { createFanOutBatchId } from "../lib/fanOutBatchId.js";
 import {
   parseActiveCommunityJids,
   resolveValueFanOutDestinationsForProject,
@@ -272,9 +273,17 @@ async function enqueueAndAttachJob(
   if (jobId === null) {
     return null;
   }
+  const current = await prisma.scheduledMessage.findUnique({
+    where: { id: rowId },
+    select: { fanOutBatchId: true },
+  });
+  const fanOutBatchId =
+    current !== null && current.fanOutBatchId !== null && current.fanOutBatchId.length > 0
+      ? current.fanOutBatchId
+      : createFanOutBatchId();
   await prisma.scheduledMessage.update({
     where: { id: rowId },
-    data: { pgBossJobId: jobId },
+    data: { pgBossJobId: jobId, fanOutBatchId },
   });
   return jobId;
 }
@@ -354,11 +363,13 @@ export function registerMessageRoutes(
       }
 
       const messageIds: string[] = [];
+      const fanOutBatchId = createFanOutBatchId();
       try {
         const fanOutResult = await prisma.$transaction(async (tx) => {
           for (const dest of destinations) {
             const shared = {
               projectId,
+              fanOutBatchId,
               groupJid: dest.groupJid,
               groupName: dest.groupName,
               scheduledAt,
@@ -432,6 +443,7 @@ export function registerMessageRoutes(
 
     const baseRow = {
       projectId,
+      fanOutBatchId: createFanOutBatchId(),
       groupJid: "groupJid" in messageBody ? messageBody.groupJid : "",
       groupName: "groupName" in messageBody ? messageBody.groupName : "",
       scheduledAt,
@@ -840,6 +852,7 @@ export function registerMessageRoutes(
         status: "PENDING",
         pgBossJobId: jobId,
         error: null,
+        fanOutBatchId: createFanOutBatchId(),
       },
     });
     return {

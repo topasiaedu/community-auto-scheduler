@@ -23,6 +23,7 @@ import { registerWaRoutes } from "./routes/wa.js";
 import { SEND_SCHEDULED_MESSAGE_QUEUE } from "./queues.js";
 import { handleSendScheduledMessageJobs } from "./worker/send-scheduled-message.js";
 import { startDailyDigest } from "./lib/dailyDigest.js";
+import { startPostUpdateSweep } from "./lib/postUpdateSweep.js";
 import { memSampleForJson, sampleMemory, startMemoryLogger } from "./lib/mem-sample.js";
 import { startRescueSweep } from "./rescue-sweep.js";
 import { WaConnectionPool } from "./wa/wa-pool.js";
@@ -142,6 +143,7 @@ async function main(): Promise<void> {
   let stopRescueSweep: (() => void) | undefined;
   let stopMemoryLogger: (() => void) | undefined;
   let stopDailyDigest: (() => void) | undefined;
+  let stopPostUpdateSweep: (() => void) | undefined;
 
   const shutdown = async (signal: string) => {
     if (shuttingDown) {
@@ -152,6 +154,7 @@ async function main(): Promise<void> {
     stopRescueSweep?.();
     stopMemoryLogger?.();
     stopDailyDigest?.();
+    stopPostUpdateSweep?.();
     fastify.log.info({ signal }, "Shutting down");
     try {
       await fastify.close();
@@ -214,6 +217,7 @@ async function main(): Promise<void> {
   /** Every 60s → Render logs; also exposed live on GET /health → memory. */
   stopMemoryLogger = startMemoryLogger(waPool, 60_000);
   stopDailyDigest = startDailyDigest(prisma, env, waPool);
+  stopPostUpdateSweep = startPostUpdateSweep(prisma, env, waPool);
 
   await fastify.listen({ port: env.PORT, host: "0.0.0.0" });
   fastify.log.info({ port: env.PORT }, "API listening");

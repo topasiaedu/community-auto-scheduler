@@ -158,12 +158,26 @@ model ScheduledMessage {
   waAcceptedAt       DateTime?
   /// When message:receipt matched waMessageId (status becomes SENT).
   waAckedAt          DateTime?
+  /// Groups rows that belong to one scheduled post (one fan-out, or one single row).
+  fanOutBatchId      String?
   reactions          MessageReaction[]
   replies            MessageReply[]
 
   @@index([projectId, scheduledAt])
   @@index([campaignId])
   @@index([waMessageId])
+  @@index([fanOutBatchId])
+}
+
+/// One WhatsApp post-update DM per fan-out batch. `postedAt` stays null until a recipient accepts it.
+model PostStatusNotice {
+  id        String    @id @default(cuid())
+  batchId   String    @unique
+  postedAt  DateTime?
+  body      String    @default("")
+  error     String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 }
 
 /// One emoji reaction per reactor on a tracked NMCAS outbound message (Agent 4).

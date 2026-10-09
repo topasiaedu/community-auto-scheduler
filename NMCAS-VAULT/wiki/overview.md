@@ -2,7 +2,7 @@
 title: "NMCAS vault overview"
 type: "overview"
 updated: "2026-09-09"
-sources: 13
+sources: 14
 tags: ["nmcas", "meta"]
 ---
 
@@ -28,7 +28,7 @@ See [[wiki/concepts/value-vs-reminder-messages]], [[wiki/sources/2026-07-08-p7-c
 - **Reminder** — SOP Show Up playbook; **Campaign** wizard schedules one community’s reminder sequence; IMAGE slots use long SOP captions; LIVE NOW = TEXT; post-live sticker optional until WebP uploaded
 - Legacy **Post** / **Poll** rows still send via worker fallback
 
-Queue **Sent** means WhatsApp **server receipt**, not proof the community can see the post ([[wiki/sources/2026-09-09-starting-soon-false-sent-rdw6]]).
+Queue **Sent** means WhatsApp **server receipt**, not proof the community can see the post ([[wiki/sources/2026-09-09-starting-soon-false-sent-rdw6]]). Queue **Failed** after “no server receipt” is also not proof the group is empty if IPC already accepted the send ([[wiki/sources/2026-09-09-rdw4-value-no-receipt-notify-vercel]]).
 
 ### Earlier DB enums
 
@@ -94,3 +94,4 @@ See [[wiki/sources/2026-04-13-nmcas-prd-v1]] for full requirements. Out of scope
 - [[wiki/sources/2026-08-27-wa-qr-client-outdated-whatsmeow-upgrade]]
 - [[wiki/sources/2026-08-27-queue-draft-resume-imageurl-session]]
 - [[wiki/sources/2026-09-09-starting-soon-false-sent-rdw6]]
+- [[wiki/sources/2026-09-09-rdw4-value-no-receipt-notify-vercel]]

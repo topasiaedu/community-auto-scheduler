@@ -1,8 +1,8 @@
 ---
 title: "Vercel + GitHub Actions deploy (private repo)"
 type: "concept"
-updated: "2026-08-26"
-sources: 1
+updated: "2026-09-09"
+sources: 2
 tags: ["deploy", "vercel", "github-actions", "ci"]
 ---
 
@@ -38,7 +38,14 @@ Applies to the **web** SPA only (`community-auto-scheduler-web`).
 - Preview origins may need API `WEB_ORIGIN` updates (exact CORS allowlist).
 - Builds consume GitHub Actions minutes.
 
+## Pitfall: pnpm lockfile (2026-09-09)
+
+This repo installs with **npm** (`package-lock.json`, `vercel.json` `installCommand: "npm ci"`). If `pnpm-lock.yaml` is present, `vercel build` on GitHub Actions selects **pnpm 10** and fails with `spawn pnpm ENOENT` (runner has no pnpm). That broke **Vercel Production** from `bebc92c` (27 Aug) until `270bdeb` (9 Sep). Do not commit a pnpm lockfile; it is gitignored. See [[wiki/sources/2026-09-09-rdw4-value-no-receipt-notify-vercel]].
+
+API deploys (DigitalOcean / PM2) are independent of this Action.
+
 ## Sources
 
 - [[wiki/sources/2026-08-26-vercel-private-repo-actions-cutover]]
+- [[wiki/sources/2026-09-09-rdw4-value-no-receipt-notify-vercel]]
 - `raw/sources/2026-08-26-vercel-private-repo-actions-cutover.md`

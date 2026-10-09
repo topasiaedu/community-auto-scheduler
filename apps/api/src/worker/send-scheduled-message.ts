@@ -27,11 +27,9 @@ import {
   buildNoReceiptErrorMessage,
   noReceiptTimeoutUpdateWhere,
 } from "../lib/waReceipt.js";
-import { toWhatsAppUserJid } from "../lib/notifyMsisdn.js";
 import { parseSendScheduledMessageJobData, type SendScheduledMessageJobData } from "../types/send-scheduled-message.js";
 
 const MAX_ERROR_LEN = 2000;
-const MAX_NOTIFY_ERROR_IN_BODY = 800;
 
 const MEDIA_PREFIXES = ["posts", "reminders", "stickers"] as const;
 
@@ -74,21 +72,6 @@ function truncateError(message: string): string {
   return `${message.slice(0, MAX_ERROR_LEN)}…`;
 }
 
-function truncateForNotifyBody(message: string): string {
-  if (message.length <= MAX_NOTIFY_ERROR_IN_BODY) {
-    return message;
-  }
-  return `${message.slice(0, MAX_NOTIFY_ERROR_IN_BODY)}…`;
-}
-
-function formatScheduledAtMyt(d: Date): string {
-  return d.toLocaleString("en-GB", {
-    timeZone: "Asia/Kuala_Lumpur",
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
-}
-
 function isAllowedMediaPath(objectPath: string, projectId: string): boolean {
   return MEDIA_PREFIXES.some((prefix) => objectPath.startsWith(`${prefix}/${projectId}/`));
 }
@@ -106,45 +89,10 @@ function isStickerPath(objectPath: string): boolean {
 }
 
 /**
- * Sends an ops alert DM on the same project's WhatsApp client to every notify MSISDN.
- */
-async function sendFailureWhatsAppAlert(
-  env: ApiEnv,
-  waPool: WaConnectionPool,
-  row: ScheduledMessage,
-  errorMessage: string,
-): Promise<void> {
-  const msisdns = env.NMCAS_FAILURE_NOTIFY_MSISDN;
-  if (msisdns.length === 0) {
-    return;
-  }
-  try {
-    await waPool.start(row.projectId);
-    if (!(await waPool.isSendReady(row.projectId))) {
-      return;
-    }
-    const wa = waPool.getManager(row.projectId);
-    const whenMyt = formatScheduledAtMyt(row.scheduledAt);
-    const text = `[NMCAS] Failed to send scheduled message to ${row.groupName} at ${whenMyt} MYT. Error: ${truncateForNotifyBody(errorMessage)}`;
-    for (const msisdn of msisdns) {
-      try {
-        await wa.sendDirectText(toWhatsAppUserJid(msisdn), text);
-      } catch {
-        /* ignore per-recipient — other numbers should still get the alert */
-      }
-    }
-  } catch {
-    /* ignore — do not fail the job handler because alert delivery failed */
-  }
-}
-
-/**
- * Persists `FAILED` and pings every configured notify MSISDN on WhatsApp for that project.
+ * Persists `FAILED`. The post-update sweep sends the ops WhatsApp DM once the batch settles.
  */
 async function markFailedWithNotify(
   prisma: PrismaClient,
-  env: ApiEnv,
-  waPool: WaConnectionPool,
   row: ScheduledMessage,
   message: string,
 ): Promise<void> {
@@ -161,7 +109,6 @@ async function markFailedWithNotify(
   if (result.count === 0) {
     return;
   }
-  await sendFailureWhatsAppAlert(env, waPool, row, message);
 }
 
 /**
@@ -193,7 +140,6 @@ async function markAccepted(
 function scheduleNoReceiptTimeout(
   prisma: PrismaClient,
   env: ApiEnv,
-  waPool: WaConnectionPool,
   row: ScheduledMessage,
   waMessageId: string,
 ): void {
@@ -215,7 +161,6 @@ function scheduleNoReceiptTimeout(
       console.warn(
         `[send-worker] no receipt within ${String(timeoutMs)}ms → FAILED id=${row.id} waMessageId=${waMessageId}`,
       );
-      await sendFailureWhatsAppAlert(env, waPool, row, error);
     })().catch((err: unknown) => {
       console.error(`[send-worker] receipt timeout handler failed id=${row.id}:`, err);
     });
@@ -270,8 +215,6 @@ async function downloadMediaAsset(
  */
 async function runSendWithTimeout(
   prisma: PrismaClient,
-  env: ApiEnv,
-  waPool: WaConnectionPool,
   row: ScheduledMessage,
   label: string,
   sendFn: () => Promise<SendResponse>,
@@ -282,7 +225,7 @@ async function runSendWithTimeout(
     if (err instanceof WaSendTimeoutError) {
       const timeoutMsg = `WhatsApp send timed out after ${String(SEND_TO_WHATSAPP_TIMEOUT_MS / 1000)}s — the message may already have been delivered. Check the group and use Re-queue if it was not sent.`;
       console.warn(`[send-worker] ${label} timed out — marking FAILED (may have sent) id=${row.id}`);
-      await markFailedWithNotify(prisma, env, waPool, row, timeoutMsg);
+      await markFailedWithNotify(prisma, row, timeoutMsg);
       return null;
     }
     const message = err instanceof Error ? err.message : "send failed";
@@ -296,7 +239,7 @@ async function runSendWithTimeout(
       });
       return null;
     }
-    await markFailedWithNotify(prisma, env, waPool, row, message);
+    await markFailedWithNotify(prisma, row, message);
     return null;
   }
 }
@@ -307,7 +250,6 @@ async function runSendWithTimeout(
 async function afterIpcAccept(
   prisma: PrismaClient,
   env: ApiEnv,
-  waPool: WaConnectionPool,
   row: ScheduledMessage,
   response: SendResponse,
 ): Promise<void> {
@@ -315,8 +257,6 @@ async function afterIpcAccept(
   if (waMessageId.length === 0) {
     await markFailedWithNotify(
       prisma,
-      env,
-      waPool,
       row,
       "WhatsApp send returned an empty message id — cannot wait for server receipt",
     );
@@ -329,35 +269,33 @@ async function afterIpcAccept(
   console.info(
     `[send-worker] IPC accepted — awaiting receipt id=${row.id} waMessageId=${waMessageId}`,
   );
-  scheduleNoReceiptTimeout(prisma, env, waPool, row, waMessageId);
+  scheduleNoReceiptTimeout(prisma, env, row, waMessageId);
 }
 
 async function sendPollRow(
   prisma: PrismaClient,
   env: ApiEnv,
-  waPool: WaConnectionPool,
   row: ScheduledMessage,
   wa: WaManager,
 ): Promise<void> {
   const question = row.pollQuestion?.trim() ?? "";
   const values = row.pollOptions.map((o) => o.trim()).filter((o) => o.length > 0);
   if (question.length === 0 || values.length < 2) {
-    await markFailedWithNotify(prisma, env, waPool, row, "Poll row is missing question or needs at least two options");
+    await markFailedWithNotify(prisma, row, "Poll row is missing question or needs at least two options");
     return;
   }
   const selectableCount = row.pollMultiSelect ? values.length : 1;
-  const response = await runSendWithTimeout(prisma, env, waPool, row, "WhatsApp poll send", () =>
+  const response = await runSendWithTimeout(prisma, row, "WhatsApp poll send", () =>
     wa.sendPoll(row.groupJid, question, values, selectableCount),
   );
   if (response !== null) {
-    await afterIpcAccept(prisma, env, waPool, row, response);
+    await afterIpcAccept(prisma, env, row, response);
   }
 }
 
 async function sendPostRow(
   prisma: PrismaClient,
   env: ApiEnv,
-  waPool: WaConnectionPool,
   row: ScheduledMessage,
   wa: WaManager,
   text: string,
@@ -375,32 +313,31 @@ async function sendPostRow(
       imageMimetype = media.mimetype;
     } catch (err) {
       const message = err instanceof Error ? err.message : "Image download failed";
-      await markFailedWithNotify(prisma, env, waPool, row, message);
+      await markFailedWithNotify(prisma, row, message);
       return;
     }
   }
 
   if (requireCaption && trimmedText.length === 0) {
-    await markFailedWithNotify(prisma, env, waPool, row, "Reminder image row is missing caption copyText");
+    await markFailedWithNotify(prisma, row, "Reminder image row is missing caption copyText");
     return;
   }
   if (trimmedText.length === 0 && imageBuffer === undefined) {
-    await markFailedWithNotify(prisma, env, waPool, row, "Nothing to send (empty text and no image)");
+    await markFailedWithNotify(prisma, row, "Nothing to send (empty text and no image)");
     return;
   }
 
-  const response = await runSendWithTimeout(prisma, env, waPool, row, "WhatsApp post send", () =>
+  const response = await runSendWithTimeout(prisma, row, "WhatsApp post send", () =>
     wa.sendPost(row.groupJid, trimmedText, imageBuffer, imageMimetype),
   );
   if (response !== null) {
-    await afterIpcAccept(prisma, env, waPool, row, response);
+    await afterIpcAccept(prisma, env, row, response);
   }
 }
 
 async function sendTextRow(
   prisma: PrismaClient,
   env: ApiEnv,
-  waPool: WaConnectionPool,
   row: ScheduledMessage,
   wa: WaManager,
   text: string,
@@ -408,21 +345,20 @@ async function sendTextRow(
 ): Promise<void> {
   const trimmedText = text.trim();
   if (trimmedText.length === 0) {
-    await markFailedWithNotify(prisma, env, waPool, row, emptyMessage);
+    await markFailedWithNotify(prisma, row, emptyMessage);
     return;
   }
-  const response = await runSendWithTimeout(prisma, env, waPool, row, "WhatsApp text send", () =>
+  const response = await runSendWithTimeout(prisma, row, "WhatsApp text send", () =>
     wa.sendPost(row.groupJid, trimmedText, undefined, "image/jpeg"),
   );
   if (response !== null) {
-    await afterIpcAccept(prisma, env, waPool, row, response);
+    await afterIpcAccept(prisma, env, row, response);
   }
 }
 
 async function sendStickerRow(
   prisma: PrismaClient,
   env: ApiEnv,
-  waPool: WaConnectionPool,
   row: ScheduledMessage,
   wa: WaManager,
   stickerUrl: string,
@@ -433,47 +369,44 @@ async function sendStickerRow(
     stickerBuffer = media.buffer;
   } catch (err) {
     const message = err instanceof Error ? err.message : "Sticker download failed";
-    await markFailedWithNotify(prisma, env, waPool, row, message);
+    await markFailedWithNotify(prisma, row, message);
     return;
   }
 
-  const response = await runSendWithTimeout(prisma, env, waPool, row, "WhatsApp sticker send", () =>
+  const response = await runSendWithTimeout(prisma, row, "WhatsApp sticker send", () =>
     wa.sendSticker(row.groupJid, stickerBuffer),
   );
   if (response !== null) {
-    await afterIpcAccept(prisma, env, waPool, row, response);
+    await afterIpcAccept(prisma, env, row, response);
   }
 }
 
 async function sendP7Message(
   prisma: PrismaClient,
   env: ApiEnv,
-  waPool: WaConnectionPool,
   row: ScheduledMessage,
   wa: WaManager,
 ): Promise<void> {
   if (row.operatorKind === "VALUE") {
     if (row.valueFormat === "POLL") {
-      await sendPollRow(prisma, env, waPool, row, wa);
+      await sendPollRow(prisma, env, row, wa);
       return;
     }
     if (row.valueFormat === "TEXT_ONLY") {
-      await sendTextRow(prisma, env, waPool, row, wa, row.copyText ?? "", "Value text-only row is missing copyText");
+      await sendTextRow(prisma, env, row, wa, row.copyText ?? "", "Value text-only row is missing copyText");
       return;
     }
     if (row.valueFormat === "IMAGE_CAPTION") {
       const imageUrl = row.imageUrl?.trim() ?? "";
       if (imageUrl.length === 0) {
-        await markFailedWithNotify(prisma, env, waPool, row, "Value image+caption row is missing imageUrl");
+        await markFailedWithNotify(prisma, row, "Value image+caption row is missing imageUrl");
         return;
       }
-      await sendPostRow(prisma, env, waPool, row, wa, row.copyText ?? "", imageUrl, false);
+      await sendPostRow(prisma, env, row, wa, row.copyText ?? "", imageUrl, false);
       return;
     }
     await markFailedWithNotify(
       prisma,
-      env,
-      waPool,
       row,
       `Unsupported value format for worker: ${row.valueFormat ?? "null"}`,
     );
@@ -482,31 +415,29 @@ async function sendP7Message(
 
   if (row.operatorKind === "REMINDER") {
     if (row.reminderFormat === "TEXT") {
-      await sendTextRow(prisma, env, waPool, row, wa, row.copyText ?? "", "Reminder text row is missing copyText");
+      await sendTextRow(prisma, env, row, wa, row.copyText ?? "", "Reminder text row is missing copyText");
       return;
     }
     if (row.reminderFormat === "IMAGE") {
       const imageUrl = row.imageUrl?.trim() ?? "";
       if (imageUrl.length === 0) {
-        await markFailedWithNotify(prisma, env, waPool, row, "Reminder image row is missing imageUrl");
+        await markFailedWithNotify(prisma, row, "Reminder image row is missing imageUrl");
         return;
       }
-      await sendPostRow(prisma, env, waPool, row, wa, row.copyText ?? "", imageUrl, true);
+      await sendPostRow(prisma, env, row, wa, row.copyText ?? "", imageUrl, true);
       return;
     }
     if (row.reminderFormat === "STICKER") {
       const stickerUrl = row.stickerUrl?.trim() ?? "";
       if (stickerUrl.length === 0) {
-        await markFailedWithNotify(prisma, env, waPool, row, "Reminder sticker row is missing stickerUrl");
+        await markFailedWithNotify(prisma, row, "Reminder sticker row is missing stickerUrl");
         return;
       }
-      await sendStickerRow(prisma, env, waPool, row, wa, stickerUrl);
+      await sendStickerRow(prisma, env, row, wa, stickerUrl);
       return;
     }
     await markFailedWithNotify(
       prisma,
-      env,
-      waPool,
       row,
       `Unsupported reminder format for worker: ${row.reminderFormat ?? "null"}`,
     );
@@ -515,8 +446,6 @@ async function sendP7Message(
 
   await markFailedWithNotify(
     prisma,
-    env,
-    waPool,
     row,
     `Unsupported operator kind for worker: ${row.operatorKind ?? "null"}`,
   );
@@ -525,22 +454,19 @@ async function sendP7Message(
 async function sendLegacyMessage(
   prisma: PrismaClient,
   env: ApiEnv,
-  waPool: WaConnectionPool,
   row: ScheduledMessage,
   wa: WaManager,
 ): Promise<void> {
   if (row.type === "POLL") {
-    await sendPollRow(prisma, env, waPool, row, wa);
+    await sendPollRow(prisma, env, row, wa);
     return;
   }
   if (row.type === "POST") {
-    await sendPostRow(prisma, env, waPool, row, wa, row.copyText ?? "", row.imageUrl, false);
+    await sendPostRow(prisma, env, row, wa, row.copyText ?? "", row.imageUrl, false);
     return;
   }
   await markFailedWithNotify(
     prisma,
-    env,
-    waPool,
     row,
     "Unsupported message: missing operatorKind and invalid legacy type",
   );
@@ -575,7 +501,7 @@ export async function handleSendScheduledMessageJobs(
         where: { id: parsed.scheduledMessageId },
       });
       if (row !== null) {
-        await markFailedWithNotify(prisma, env, waPool, row, `Worker crashed: ${msg}`);
+        await markFailedWithNotify(prisma, row, `Worker crashed: ${msg}`);
       }
     }
   }
@@ -609,8 +535,6 @@ async function processOneJob(
   if (row.operatorKind === null && row.type !== "POST" && row.type !== "POLL") {
     await markFailedWithNotify(
       prisma,
-      env,
-      waPool,
       row,
       "Unsupported message: missing operatorKind and invalid legacy type",
     );
@@ -657,9 +581,9 @@ async function processOneJob(
   }
 
   if (row.operatorKind !== null) {
-    await sendP7Message(prisma, env, waPool, row, wa);
+    await sendP7Message(prisma, env, row, wa);
     return;
   }
 
-  await sendLegacyMessage(prisma, env, waPool, row, wa);
+  await sendLegacyMessage(prisma, env, row, wa);
 }

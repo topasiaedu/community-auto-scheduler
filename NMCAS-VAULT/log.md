@@ -163,3 +163,38 @@ Append-only timeline of ingests, filed queries, and lint passes. Newest entries 
 - Question: Production web build failed after the notify-contact push.
 - Answer filed: not filed
 - Notes: GitHub Action `34339582618` failed at `vercel build --prod`: `Installing dependencies with pnpm 10` then `spawn pnpm ENOENT`. Cause: `pnpm-lock.yaml` added in `bebc92c` (same failure 2026-08-27); repo is npm (`package-lock.json`, `vercel.json` `installCommand: npm ci`). Actions runner has no pnpm. Fix: remove `pnpm-lock.yaml`. API on DO was already restarted; this is web-only.
+
+## [2026-09-09] ingest | RDW 4.0 Value no-receipt, notify contact, Vercel pnpm
+- Raw: `raw/sources/2026-09-09-rdw4-value-no-receipt-notify-vercel.md`
+- Wiki: [[wiki/sources/2026-09-09-rdw4-value-no-receipt-notify-vercel]], [[wiki/entities/scheduled-message]], [[wiki/entities/project]], [[wiki/concepts/pg-boss-scheduler]], [[wiki/concepts/vercel-github-actions-deploy]], [[wiki/overview]], [[wiki/sources/2026-09-09-starting-soon-false-sent-rdw6]], [[index]]
+- Notes: 9 Sep 11:00 Value fan-out; RDW 4.0 IPC accept then Go crash → FAILED; RDW 2.0 no id. Defaults `60139968817` + `60176782206` (`246ffff`). Web CI `pnpm-lock.yaml` ENOENT since `bebc92c`; fixed `270bdeb`.
+
+## [2026-10-08] query | Telegram status vs WhatsApp group arrival
+- Question: Can NMCAS tell that a scheduled post really arrived in each community group, then send that status to a Telegram group?
+- Answer filed: [[wiki/analysis/telegram-post-status-delivery-tracking]]
+- Notes: Telegram `sendMessage` is fine. Today’s `SENT` is any `message:receipt` and already false-greened RDW 6.0. whatsmeow `ReceiptTypeSender` and an `isFromMe` echo are the candidates for “in the chat”; all-member double ticks are the wrong on-time gate. Log `type` + `chat` on a test community before building the bot.
+
+## [2026-10-08] query | Primary sources for group arrival
+- Question: Can whatsmeow reliably detect that a group or Community Announcements send became visible?
+- Answer filed: [[wiki/analysis/telegram-post-status-delivery-tracking]]
+- Notes: Partial. `SendMessage` return is server ack only. Typed group receipts (`""`, `inactive`, `sender`, `read`) are per device. No source defines “visible in the chat,” and none documents a drop-after-ack. Announcements are `@g.us` (`IsAnnounce && IsDefaultSubGroup`), not newsletters. Telegram `sendMessage` to `chat_id` returns the sent Message.
+
+## [2026-10-08] query | Telegram post-status implementation plan
+- Question: What blocks the Telegram post-status feature, and what is the implementation plan?
+- Answer filed: [[wiki/analysis/telegram-post-status-implementation-plan]]
+- Notes: “Arrived in every community” is blocked. Buildable scope is one Telegram checklist per fan-out batch using stored receipt type and chat. Queue Sent stays unchanged. Phases 0–4; no code in this session.
+
+## [2026-10-09] query | Post-update plan switched to WhatsApp DM
+- Question: Replace the Telegram implementation plan with a WhatsApp notification to the two ops numbers whenever a scheduled post finishes, success or failure, using the approved message.
+- Answer filed: [[wiki/analysis/telegram-post-status-implementation-plan]]
+- Notes: Telegram arrival plan withdrawn. One DM per batch to `60139968817` and `60176782206`. Sent/Failed match Queue. This update replaces the immediate failure DM. Daily digest unchanged. No code in this session.
+
+## [2026-10-09] query | Failure alert replaced by post update
+- Question: Replace the existing WhatsApp failure alert with one notification each time a scheduled post is posted.
+- Answer filed: [[wiki/analysis/telegram-post-status-implementation-plan]]
+- Notes: Owner confirmed. One DM per finished post to the two ops numbers, Sent or Failed. Immediate `[NMCAS] Failed to send…` DM goes away. Daily digest stays.
+
+## [2026-10-09] query | Implement WhatsApp post-update notification
+- Question: Implement the approved post-update plan.
+- Answer filed: [[wiki/analysis/telegram-post-status-implementation-plan]]
+- Notes: Code in API. One DM per `fanOutBatchId` after the batch settles. Immediate failure DM removed. Formatter tests pass. Live send to the two phones not run. Migration `20261009120000_post_status_notice` not applied from this session.

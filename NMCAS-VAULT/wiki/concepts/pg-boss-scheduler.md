@@ -2,7 +2,7 @@
 title: "pg-boss job scheduler"
 type: "concept"
 updated: "2026-09-09"
-sources: 4
+sources: 5
 tags: ["scheduling", "pg-boss", "postgres", "nmcas"]
 ---
 
@@ -80,6 +80,7 @@ All jobs are one-off. Recurring scheduling is out of scope for V1.
 - Implementation snapshot: `raw/sources/2026-04-18-nmcas-implementation-snapshot.md`
 - Stability hardening: `raw/sources/2026-04-21-stability-hardening-session.md`
 - False SENT vs visible: `raw/sources/2026-09-09-starting-soon-false-sent-rdw6.md`
+- False FAILED / notify / Vercel: `raw/sources/2026-09-09-rdw4-value-no-receipt-notify-vercel.md`
 
 ## See also
 
@@ -87,4 +88,5 @@ All jobs are one-off. Recurring scheduling is out of scope for V1.
 - [[wiki/entities/scheduled-message]]
 - [[wiki/sources/2026-04-21-stability-hardening-session]]
 - [[wiki/sources/2026-09-09-starting-soon-false-sent-rdw6]]
+- [[wiki/sources/2026-09-09-rdw4-value-no-receipt-notify-vercel]]
 - [[wiki/overview]]

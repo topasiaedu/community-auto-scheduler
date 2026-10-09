@@ -1,8 +1,8 @@
 ---
 title: "Entity: ScheduledMessage"
 type: "entity"
-updated: "2026-09-09"
-sources: 6
+updated: "2026-10-08"
+sources: 7
 tags: ["entity", "nmcas", "data-model"]
 ---
 
@@ -84,7 +84,7 @@ As of [[wiki/sources/2026-07-27-wa-reliability-always-on-plan]] **Stage B** (imp
 
 **Limitation (2026-09-08):** Stage B is a **server ack**, not proof the community can see the post. `handleMessageReceipt` does not require an outbound echo (`isFromMe`, plan Stage C) and does not check `receipt.chat` against `groupJid`. RDW 6.0 Starting Soon was `SENT` with a 568 ms receipt while Announcements stayed empty; LIVE NOW / Sticker / Value on the same JID **were** visible. See [[wiki/sources/2026-09-09-starting-soon-false-sent-rdw6]].
 
-**Inverse (2026-09-09):** missing receipt is also not proof of non-delivery. RDW 4.0 Value (`cmtl74ex600gwe7o769yr5qfh`) got IPC accept (`waMessageId` `3EB0546133EC6E9CEC1F3D` at 11:00:49 MYT) then `FAILED` after 90s because the whatsmeow Go process exited before `message:receipt`. Same 11:00 fan-out: RDW / 3.0 / 5.0 / 6.0 `SENT`; RDW 2.0 `FAILED` with no id (`Go process exited with code null`). If the community already shows the post, do **not** Re-queue (duplicate risk).
+**Inverse (2026-09-09):** missing receipt is also not proof of non-delivery. RDW 4.0 Value (`cmtl74ex600gwe7o769yr5qfh`) got IPC accept (`waMessageId` `3EB0546133EC6E9CEC1F3D` at 11:00:49 MYT) then `FAILED` after 90s because the whatsmeow Go process exited before `message:receipt`. Same 11:00 fan-out: RDW / 3.0 / 5.0 / 6.0 `SENT`; RDW 2.0 `FAILED` with no id (`Go process exited with code null`). If the community already shows the post, do **not** Re-queue (duplicate risk). See [[wiki/sources/2026-09-09-rdw4-value-no-receipt-notify-vercel]].
 
 Value fan-out remains **one row per community** — each destination has its own id/receipt.
 
@@ -137,3 +137,6 @@ Full spec: [[wiki/concepts/campaign-message-schedule]], [[wiki/analysis/p7-ux-sp
 - [[wiki/concepts/pg-boss-scheduler]]
 - [[wiki/sources/2026-08-27-queue-draft-resume-imageurl-session]]
 - [[wiki/sources/2026-09-09-starting-soon-false-sent-rdw6]]
+- [[wiki/sources/2026-09-09-rdw4-value-no-receipt-notify-vercel]]
+- [[wiki/analysis/telegram-post-status-delivery-tracking]] — linked-device receipts are per device; no source defines “visible in the community chat.”
+- [[wiki/analysis/telegram-post-status-implementation-plan]] — one WhatsApp post-update DM to the two ops numbers when a batch finishes; replaces the immediate failure DM.

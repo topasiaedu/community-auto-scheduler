@@ -1,8 +1,8 @@
 ---
 title: "Entity: Project"
 type: "entity"
-updated: "2026-07-08"
-sources: 2
+updated: "2026-09-09"
+sources: 3
 tags: ["entity", "nmcas", "data-model"]
 ---
 
@@ -47,6 +47,10 @@ model Project {
 - Settings: `sopUrl`, `campaignNote`, Reminder template library
 - Switching projects changes WA session, queue, and templates
 
+## Failure / digest notify (2026-09-09)
+
+`NotifyRecipient` exists on the project but is **unused** (empty in production). Ops WhatsApp DMs for `FAILED` sends and the daily digest use `NMCAS_FAILURE_NOTIFY_MSISDN` parsed by `resolveNotifyMsisdns`. Defaults always include `60139968817` and `60176782206`. Alerts go as 1:1 chats via the **same project's** WhatsApp session, not into the community. See [[wiki/sources/2026-09-09-rdw4-value-no-receipt-notify-vercel]].
+
 ## API
 
 - `GET /projects` — list all (org-wide access)
@@ -56,9 +60,11 @@ model Project {
 
 - Grounded in: `raw/sources/2026-04-13-nmcas-prd-v1.md`
 - P7 extensions: [[wiki/analysis/p7-implementation-plan]], [[wiki/analysis/p7-ux-spec]]
+- Notify defaults: `raw/sources/2026-09-09-rdw4-value-no-receipt-notify-vercel.md`
 
 ## See also
 
 - [[wiki/concepts/multi-project-architecture]]
 - [[wiki/entities/scheduled-message]]
 - [[wiki/concepts/wa-connection-pool]]
+- [[wiki/concepts/pg-boss-scheduler]]

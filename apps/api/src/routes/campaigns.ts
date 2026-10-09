@@ -13,6 +13,7 @@ import {
   REMINDER_TEMPLATE_SLOT_DEFINITIONS,
 } from "@nmcas/db";
 import { ensureReminderTemplates } from "../lib/ensureReminderTemplates.js";
+import { createFanOutBatchId } from "../lib/fanOutBatchId.js";
 import {
   computeOptionalValueTime,
   computeReminderSlotTime,
@@ -314,6 +315,7 @@ export function registerCampaignRoutes(
             data: {
               projectId,
               campaignId: campaign.id,
+              fanOutBatchId: createFanOutBatchId(),
               groupJid: body.reminderGroupJid,
               groupName: body.reminderGroupName,
               type: "POST",
@@ -358,11 +360,13 @@ export function registerCampaignRoutes(
             if (valueRow.scheduledAt.getTime() < minTime.getTime()) {
               throw new Error("A value post slot is in the past");
             }
+            const fanOutBatchId = createFanOutBatchId();
             for (const dest of destinations) {
               const row = await tx.scheduledMessage.create({
                 data: {
                   projectId,
                   campaignId: campaign.id,
+                  fanOutBatchId,
                   groupJid: dest.groupJid,
                   groupName: dest.groupName,
                   type: "POST",

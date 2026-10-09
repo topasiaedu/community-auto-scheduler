@@ -28,9 +28,12 @@ Wrong JID; skipped job; corrupt `04-starting-soon.jpeg` (same file landed on ear
 
 July 2026 missed Starting Soon was **Render OOM / job never ran** ([[wiki/sources/2026-07-16-do-migration-oom-incident-session]]). This incident is **job ran + false green Sent**.
 
+The inverse (IPC accept, no receipt, Queue FAILED, group may still show the post) is [[wiki/sources/2026-09-09-rdw4-value-no-receipt-notify-vercel]] (RDW 4.0 Value 2026-09-09).
+
 ## See also
 
 - [[wiki/entities/scheduled-message]]
 - [[wiki/concepts/campaign-message-schedule]]
 - [[wiki/sources/2026-07-27-wa-reliability-always-on-plan]]
+- [[wiki/sources/2026-09-09-rdw4-value-no-receipt-notify-vercel]]
 - [[wiki/overview]]

@@ -31,6 +31,7 @@ Catalog of all wiki pages. Updated after every ingest, filed query, or lint pass
 - [[wiki/sources/2026-08-27-wa-qr-client-outdated-whatsmeow-upgrade]] — Same QR UI on healthy RAM; `err-client-outdated`; whatsmeow-node 0.6.0 → 0.7.0 on DO; `qr event` codeLen=277.
 - [[wiki/sources/2026-08-27-queue-draft-resume-imageurl-session]] — Queue Resume no-op + fan-out POST on draft; fixes `205569d` / `9f71e25` (navigate + PATCH).
 - [[wiki/sources/2026-09-09-starting-soon-false-sent-rdw6]] — RDW 6.0 Starting Soon 11:00 SENT in Queue, not visible; LIVE NOW/sticker/Value landed; Stage B server ack ≠ group visible.
+- [[wiki/sources/2026-09-09-rdw4-value-no-receipt-notify-vercel]] — RDW 4.0 Value 11:00 FAILED no receipt after Go crash; second ops notify number; Vercel pnpm ENOENT fix.
 - `raw/sources/2026-07-10-p8a-late-campaign-partial-schedule.md` — P8-A agent brief: skip past / explicit Welcome skip for Show Up campaigns.
 - `raw/sources/2026-07-10-p8b-value-fan-out-active-communities.md` — P8-B agent brief: Value fan-out from Single message + active communities in Settings.
 
@@ -44,15 +45,15 @@ Catalog of all wiki pages. Updated after every ingest, filed query, or lint pass
 - [[wiki/concepts/multi-project-architecture]] — Project as top-level entity; how resources are scoped per project.
 - [[wiki/concepts/wa-connection-pool]] — whatsmeow-node pool; SQLite + WhatsAppSessionBlob; always-on + QR pairing RAM notes (2026-08-27).
 - [[wiki/concepts/wa-qr-pairing-low-ram]] — QR / phone pairing on 512 MB DO; RAM-first boot vs client-outdated 405; env tuning.
-- [[wiki/concepts/pg-boss-scheduler]] — pg-boss Postgres-backed job queue; rescue sweep; requeue route; race protection table.
-- [[wiki/concepts/vercel-github-actions-deploy]] — Private-repo web deploys via Actions + CLI token; native Git disabled.
+- [[wiki/concepts/pg-boss-scheduler]] — pg-boss Postgres-backed job queue; rescue sweep; requeue; receipt-gated SENT/FAILED; ops notify DMs.
+- [[wiki/concepts/vercel-github-actions-deploy]] — Private-repo web deploys via Actions + CLI token; native Git disabled; npm-only lockfile (no pnpm).
 
 ---
 
 ## Entities
 
-- [[wiki/entities/project]] — Project data model: owns sessions, messages, notify recipients, and WA connection.
-- [[wiki/entities/scheduled-message]] — ScheduledMessage: Value/Reminder; receipt-gated SENT (server ack); Stage C echo not implemented (RDW 6.0 Starting Soon 2026-09-08).
+- [[wiki/entities/project]] — Project data model: owns sessions, messages, unused NotifyRecipient table; ops DMs via env defaults.
+- [[wiki/entities/scheduled-message]] — ScheduledMessage: Value/Reminder; receipt-gated SENT (server ack); Stage C echo not implemented; false SENT (RDW 6.0) and false FAILED (RDW 4.0).
 
 ---
 
@@ -60,8 +61,10 @@ Catalog of all wiki pages. Updated after every ingest, filed query, or lint pass
 
 - [[wiki/analysis/p7-implementation-plan]] — P7 build plan: schema, API, worker, phases 1–7.
 - [[wiki/analysis/p7-ux-spec]] — P7 agent-ready UX + API: wizard, validation, contracts, acceptance matrix.
+- [[wiki/analysis/telegram-post-status-delivery-tracking]] — Primary sources: no signal means “visible in the group”; server ack vs typed receipt; Announcements are groups, not newsletters.
+- [[wiki/analysis/telegram-post-status-implementation-plan]] — WhatsApp post-update plan: one DM to the two ops numbers when a scheduled batch finishes (Sent or Failed). Telegram arrival plan withdrawn.
 - `CLAUDE.md` — Schema and agent rules (see vault root).
 
 ---
 
-*Last indexed: 2026-09-09 — Starting Soon false SENT (RDW 6.0).*
+*Last indexed: 2026-10-09 — Post-update plan switched from Telegram to a WhatsApp DM.*

@@ -9,7 +9,7 @@
 
 import type { PrismaClient } from "@nmcas/db";
 import type { ApiEnv } from "../env.js";
-import type { WaConnectionUiState } from "./wa-manager.js";
+import type { WaStatusSnapshot } from "./wa-manager.js";
 import { WaManager } from "./wa-manager.js";
 
 export class WaConnectionPool {
@@ -87,12 +87,18 @@ export class WaConnectionPool {
   }
 
   /**
+   * Project ids that already have a manager in this process.
+   * Does not create or start a session.
+   */
+  listWarmProjectIds(): string[] {
+    return [...this.managers.keys()];
+  }
+
+  /**
    * In-memory status for a project that is already warm. Does not create or start a manager.
    * Returns null when the project has no live client in this process.
    */
-  peekStatusSnapshot(
-    projectId: string,
-  ): { state: WaConnectionUiState; hasQr: boolean } | null {
+  peekStatusSnapshot(projectId: string): WaStatusSnapshot | null {
     const manager = this.managers.get(projectId.trim());
     if (manager === undefined) {
       return null;

@@ -45,6 +45,19 @@ import {
 
 export type WaConnectionUiState = "disconnected" | "connecting" | "connected";
 
+/** In-memory WhatsApp status. Safe to read on an HTTP request without booting a session. */
+export type WaStatusSnapshot = {
+  state: WaConnectionUiState;
+  hasQr: boolean;
+  pairing: boolean;
+  hasClient: boolean;
+  startWorkInFlight: boolean;
+  lastError: string | null;
+  bootPhase: string | null;
+  /** True after WhatsApp logged this session out. It will not reconnect until a new QR scan. */
+  loggedOut: boolean;
+};
+
 const RECONNECT_BASE_DELAY_MS = 1_000;
 const RECONNECT_MAX_DELAY_MS = 60_000;
 
@@ -302,15 +315,7 @@ export class WaManager {
    * Cheap in-memory snapshot for HTTP status endpoints.
    * Avoids awaiting cold boot/persist on request paths.
    */
-  getStatusSnapshot(): {
-    state: WaConnectionUiState;
-    hasQr: boolean;
-    pairing: boolean;
-    hasClient: boolean;
-    startWorkInFlight: boolean;
-    lastError: string | null;
-    bootPhase: string | null;
-  } {
+  getStatusSnapshot(): WaStatusSnapshot {
     const hasQr = this.latestQr !== undefined;
     return {
       state: hasQr ? "connecting" : this.uiState,
@@ -320,6 +325,7 @@ export class WaManager {
       startWorkInFlight: this.startWorkInFlight,
       lastError: this.lastError ?? null,
       bootPhase: this.bootPhase ?? null,
+      loggedOut: this.isLoggedOut,
     };
   }
 

@@ -87,6 +87,50 @@ const EnvSchema = z.object({
   }, z.boolean().default(true)),
   /** Local hour in Asia/Kuala_Lumpur (0–23) when the daily digest DM is sent. */
   NMCAS_DIGEST_HOUR_MYT: z.coerce.number().int().min(0).max(23).default(8),
+  /**
+   * Bot token from Telegram @BotFather. Empty disables the WhatsApp link alert
+   * without failing startup. Never log this value.
+   */
+  TELEGRAM_BOT_TOKEN: z.preprocess((raw) => {
+    if (typeof raw !== "string") {
+      return "";
+    }
+    return raw.trim();
+  }, z.string()),
+  /**
+   * Telegram group chat id (negative for groups). Empty disables the WhatsApp link alert.
+   */
+  TELEGRAM_CHAT_ID: z.preprocess((raw) => {
+    if (typeof raw !== "string") {
+      return "";
+    }
+    return raw.trim();
+  }, z.string()),
+  /**
+   * WhatsApp disconnect alerts to the Telegram group.
+   * Kill-switch: `false` / `0` / `no` / `off`.
+   */
+  NMCAS_TELEGRAM_WA_ALERT_ENABLED: z.preprocess((raw) => {
+    if (raw === undefined) {
+      return undefined;
+    }
+    const asString = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+    if (asString === "") {
+      return undefined;
+    }
+    if (["false", "0", "no", "off"].includes(asString)) {
+      return false;
+    }
+    if (["true", "1", "yes", "on"].includes(asString)) {
+      return true;
+    }
+    return undefined;
+  }, z.boolean().default(true)),
+  /**
+   * How long a warm WhatsApp session must stay not send-ready before one Telegram alert.
+   * Logout and "client outdated" skip this wait. Default is 3 minutes.
+   */
+  NMCAS_WA_DOWN_GRACE_MS: z.coerce.number().int().positive().default(180_000),
 });
 
 export type ApiEnv = z.infer<typeof EnvSchema>;

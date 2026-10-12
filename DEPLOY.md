@@ -47,6 +47,12 @@ Render sets **`PORT`**; the API already listens on `process.env.PORT`.
 | `SUPABASE_SERVICE_ROLE_KEY` | **Secret** — Storage (post images) server-side. |
 | `NMCAS_POST_MEDIA_BUCKET` | Private bucket name. |
 | `NMCAS_FAILURE_NOTIFY_MSISDN` | Optional; one MSISDN or comma-separated list for failure alerts and the daily digest. Defaults include `60139968817` and `60176782206`. |
+| `TELEGRAM_BOT_TOKEN` | Optional. Bot token from @BotFather. Empty skips the WhatsApp disconnect alert. Do not commit it. |
+| `TELEGRAM_CHAT_ID` | Optional. Telegram group id, including the minus sign. Empty skips the alert. |
+| `NMCAS_TELEGRAM_WA_ALERT_ENABLED` | Optional. Default on. Set `false` to stop the Telegram alert without removing the token. |
+| `NMCAS_WA_DOWN_GRACE_MS` | Optional. Milliseconds a session must stay disconnected before one alert. Default `180000` (3 minutes). Logout does not wait. |
+
+BotFather steps, the chat id, and the live check are in `NMCAS-VAULT/wiki/analysis/telegram-wa-disconnect-alert.md`. On the droplet, put the token and chat id in the API `.env`, then `pm2 restart nmcas-api --update-env`.
 
 Optional: `DIRECT_URL` only if you later add Prisma `directUrl` for migrations behind PgBouncer (not required for typical Supabase session URL).
 

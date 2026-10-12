@@ -15,7 +15,7 @@
     "@fastify/multipart": "^9.0.3",
     "@nmcas/db": "*",
     "@supabase/supabase-js": "^2.49.1",
-    "@whatsmeow-node/whatsmeow-node": "^0.7.0",
+    "@whatsmeow-node/whatsmeow-node": "0.8.0",
     "dotenv": "^16.4.7",
     "fastify": "^5.2.1",
     "pg-boss": "^10.1.6",

@@ -267,6 +267,13 @@ export class WaManager {
    */
   private isLoggedOut: boolean = false;
 
+  /**
+   * True after WhatsApp rejects the bundled client version (HTTP 405).
+   * whatsmeow does not reconnect; Node must not spawn another Go process in a loop.
+   * Cleared on `start()` so a post-upgrade boot can retry.
+   */
+  private isClientOutdated: boolean = false;
+
   /** Debounced auto-repair after QR channel timeout / error (no manual reset required). */
   private qrRepairTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -275,6 +282,10 @@ export class WaManager {
 
   private static readonly GROUP_CACHE_TTL_MS = 5 * 60_000;
   private static readonly MAX_QR_REPAIR_ATTEMPTS = 3;
+
+  /** Operator-facing copy when WhatsApp rejects the whatsmeow client version. */
+  private static readonly CLIENT_OUTDATED_ERROR =
+    "WhatsApp rejected this app version (client outdated). Update @whatsmeow-node/whatsmeow-node on the server, then Clear session.";
 
   /** Was 60s; 8MB session re-read every minute caused avoidable heap spikes on 512MB. */
   private static readonly PERSIST_INTERVAL_MS = 5 * 60_000;
@@ -398,6 +409,7 @@ export class WaManager {
     }
     // A fresh start supersedes any pending reconnect timer.
     this.isLoggedOut = false;
+    this.isClientOutdated = false;
     this.cancelQrRepairTimer();
     this.cancelReconnectTimer();
     this.touchActivity();
@@ -1018,14 +1030,32 @@ export class WaManager {
         }
       }
       if (payload.event === "err-client-outdated") {
-        this.qrRepairAttempts = WaManager.MAX_QR_REPAIR_ATTEMPTS;
-        this.lastError =
-          "WhatsApp rejected this app version (client outdated). Update @whatsmeow-node/whatsmeow-node on the server, then Clear session.";
-        this.bootPhase = undefined;
-        this.qrPairingActive = false;
+        this.markClientOutdated("qr:error err-client-outdated");
         return;
       }
       this.scheduleQrRepair(`qr_error_${payload.event}`);
+    });
+
+    /**
+     * 0.8+: WhatsApp rejected the advertised web client version (405).
+     * whatsmeow does not reconnect; stop QR repair and Node reconnect loops.
+     */
+    client.on("client_outdated", () => {
+      this.latestQr = undefined;
+      this.qrPairingActive = false;
+      this.bootPhase = undefined;
+      this.uiState = "disconnected";
+      this.cancelReconnectTimer();
+      const dying = this.client;
+      this.client = undefined;
+      if (dying !== undefined) {
+        try {
+          dying.close();
+        } catch {
+          /* ignore */
+        }
+      }
+      this.markClientOutdated("client_outdated");
     });
 
     client.on("connected", () => {
@@ -1084,8 +1114,13 @@ export class WaManager {
         this.qrPairingActive = false;
         this.latestQr = undefined;
         this.client = undefined;
-        this.lastError = `WhatsApp engine exited (code ${String(code)})`;
         this.stopGroupsRefreshLoop();
+        // Keep the operator-facing outdated message; do not spawn another Go process.
+        if (this.isClientOutdated) {
+          this.lastError = WaManager.CLIENT_OUTDATED_ERROR;
+          return;
+        }
+        this.lastError = `WhatsApp engine exited (code ${String(code)})`;
         this.scheduleReconnect(`exit_code_${String(code)}`);
       }
     });
@@ -1412,7 +1447,7 @@ export class WaManager {
    * Stops after {@link WaManager.MAX_QR_REPAIR_ATTEMPTS} so the UI is not stuck forever.
    */
   private scheduleQrRepair(reason: string): void {
-    if (this.isShuttingDown || this.isLoggedOut) {
+    if (this.isShuttingDown || this.isLoggedOut || this.isClientOutdated) {
       return;
     }
     if (this.qrRepairAttempts >= WaManager.MAX_QR_REPAIR_ATTEMPTS) {
@@ -1471,8 +1506,25 @@ export class WaManager {
    * Schedules a supervised reconnect attempt with exponential backoff.
    * Timers are canceled on `shutdown` and on `logged_out`.
    */
+  /**
+   * Stops QR repair / reconnect after WhatsApp rejects the client version (405).
+   */
+  private markClientOutdated(source: string): void {
+    this.isClientOutdated = true;
+    this.qrRepairAttempts = WaManager.MAX_QR_REPAIR_ATTEMPTS;
+    this.lastError = WaManager.CLIENT_OUTDATED_ERROR;
+    this.bootPhase = undefined;
+    this.qrPairingActive = false;
+    this.uiState = "disconnected";
+    this.cancelQrRepairTimer();
+    this.cancelReconnectTimer();
+    console.error(
+      `[WaManager] client outdated projectId=${this.projectId} source=${source}`,
+    );
+  }
+
   private scheduleReconnect(reason: string): void {
-    if (this.isShuttingDown || this.isLoggedOut) {
+    if (this.isShuttingDown || this.isLoggedOut || this.isClientOutdated) {
       return;
     }
     if (this.isQrLinkInProgress() || this.qrRepairTimer !== undefined) {

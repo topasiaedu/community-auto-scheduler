@@ -56,11 +56,12 @@ describe("format alert text", () => {
       sinceMs: Date.parse("2026-10-12T03:40:00.000Z"),
       reason: "logged out — scan a new QR",
     });
-    assert.match(down, /\[NMCAS\] WhatsApp is not connected/);
+    assert.match(down, /^🔴 WhatsApp is not connected/);
+    assert.equal(down.includes("[NMCAS]"), false);
     assert.match(down, /Project: Show Up/);
     assert.match(down, /Since: 12 Oct 2026, 11:40 MYT/);
     assert.match(down, /Reason: logged out — scan a new QR/);
-    assert.equal(formatWaUpAlert("Show Up"), "[NMCAS] WhatsApp is connected again\nProject: Show Up");
+    assert.equal(formatWaUpAlert("Show Up"), "🟢 WhatsApp is connected again\nProject: Show Up");
   });
 });
 

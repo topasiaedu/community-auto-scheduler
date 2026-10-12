@@ -227,7 +227,7 @@ export function formatWaDownAlert(input: {
   reason: string;
 }): string {
   const lines = [
-    "[NMCAS] WhatsApp is not connected",
+    "🔴 WhatsApp is not connected",
     `Project: ${input.projectName}`,
     `Since: ${formatAlertWhenMyt(input.sinceMs)}`,
     `Reason: ${input.reason}`,
@@ -239,7 +239,7 @@ export function formatWaDownAlert(input: {
  * Recovery body. Sent once, and only after the down message was delivered.
  */
 export function formatWaUpAlert(projectName: string): string {
-  const lines = ["[NMCAS] WhatsApp is connected again", `Project: ${projectName}`];
+  const lines = ["🟢 WhatsApp is connected again", `Project: ${projectName}`];
   return lines.join("\n");
 }
 

@@ -1,18 +1,20 @@
 /**
- * Sends one WhatsApp post-update DM per finished scheduled post.
- * Replaces the immediate per-row failure alert. The daily digest is unchanged.
+ * Closes each finished scheduled post once.
+ * Community Reminder batches update one Telegram status message.
+ * Every other batch is marked handled with no WhatsApp post-update DM.
+ * The daily digest is unchanged.
  */
 
 import type { PrismaClient } from "@nmcas/db";
 import type { ApiEnv } from "../env.js";
-import type { WaConnectionPool } from "../wa/wa-pool.js";
-import { toWhatsAppUserJid } from "./notifyMsisdn.js";
+import { isPostUpdateBatchReady } from "./postUpdateNotice.js";
 import {
-  formatPostUpdateNotice,
-  isPostUpdateBatchReady,
-  type PostUpdateNoticeRow,
-  type PostUpdateRowStatus,
-} from "./postUpdateNotice.js";
+  collectReminderBoard,
+  deliverReminderBoard,
+  parseReminderBoardLines,
+  reminderBoardLinesToJson,
+  type ReminderBatchSourceRow,
+} from "./reminderStatusBoard.js";
 
 /** How long a claimed notice stays owned before another sweep may retry a failed DM. */
 const CLAIM_STALE_MS = 2 * 60_000;
@@ -23,18 +25,17 @@ const MAX_BATCHES_PER_SWEEP = 10;
 const POST_UPDATE_INTERVAL_MS = 60_000;
 
 /**
- * One sweep: assign batch ids to finished legacy rows, then DM each ready batch once.
+ * One sweep: assign batch ids to finished legacy rows, then close each ready batch once.
  */
 export async function runPostUpdateSweep(
   prisma: PrismaClient,
   env: ApiEnv,
-  waPool: WaConnectionPool,
 ): Promise<void> {
   try {
     await assignLegacyBatchIds(prisma);
     const batchIds = await listCandidateBatchIds(prisma);
     for (const batchId of batchIds) {
-      await notifyBatch(prisma, env, waPool, batchId);
+      await settleBatch(prisma, env, batchId);
     }
   } catch (err: unknown) {
     console.error(
@@ -50,11 +51,10 @@ export async function runPostUpdateSweep(
 export function startPostUpdateSweep(
   prisma: PrismaClient,
   env: ApiEnv,
-  waPool: WaConnectionPool,
   intervalMs = POST_UPDATE_INTERVAL_MS,
 ): () => void {
   const timer = setInterval(() => {
-    void runPostUpdateSweep(prisma, env, waPool);
+    void runPostUpdateSweep(prisma, env);
   }, intervalMs);
   timer.unref?.();
   console.warn(`[post-update] started (interval=${String(intervalMs)}ms)`);
@@ -114,12 +114,12 @@ async function listCandidateBatchIds(prisma: PrismaClient): Promise<string[]> {
 }
 
 /**
- * Builds and sends the DM for one batch when it is ready. A second sweep does not send again.
+ * Builds the Telegram board for a reminder batch, or closes any other ready batch with no chat message.
+ * A failed Telegram call leaves the batch unposted so a later sweep can retry.
  */
-async function notifyBatch(
+async function settleBatch(
   prisma: PrismaClient,
   env: ApiEnv,
-  waPool: WaConnectionPool,
   batchId: string,
 ): Promise<void> {
   const stored = await prisma.scheduledMessage.findMany({
@@ -127,54 +127,88 @@ async function notifyBatch(
     orderBy: { createdAt: "asc" },
     include: {
       project: { select: { id: true, name: true } },
-      reminderTemplate: { select: { name: true } },
+      reminderTemplate: {
+        select: {
+          slotKey: true,
+          sortOrder: true,
+          scheduleRuleKind: true,
+          dayOffset: true,
+        },
+      },
     },
   });
   if (stored.length === 0) {
     return;
   }
-  const noticeRows = stored.flatMap((row) => {
-    const mapped = toNoticeRow(row);
-    return mapped === null ? [] : [mapped];
-  });
   if (
     !isPostUpdateBatchReady(
-      noticeRows,
+      stored,
       Date.now(),
       env.WA_RECEIPT_TIMEOUT_MS,
     )
   ) {
     return;
   }
-  const text = formatPostUpdateNotice(noticeRows);
   const owned = await claimNotice(prisma, batchId);
   if (!owned) {
     return;
   }
-  if (text === null) {
+
+  const reminder = collectReminderBoard(stored.map((row) => toBoardSource(row)));
+  if (reminder === null) {
     await prisma.postStatusNotice.update({
       where: { batchId },
       data: { postedAt: new Date(), body: "", error: null },
     });
+    console.warn(`[post-update] closed without WhatsApp DM batch=${batchId}`);
     return;
   }
-  const projectId = stored[0]?.projectId;
-  if (projectId === undefined || projectId.length === 0) {
-    await markNoticeError(prisma, batchId, text, "Missing project id");
+
+  const existing = await prisma.campaignReminderBoard.findUnique({
+    where: { campaignId: reminder.campaignId },
+  });
+  const delivered = await deliverReminderBoard({
+    token: env.TELEGRAM_BOT_TOKEN,
+    chatId: env.TELEGRAM_CHAT_ID,
+    projectName: reminder.projectName,
+    board:
+      existing === null
+        ? null
+        : {
+            chatId: existing.chatId,
+            messageId: existing.messageId,
+            lines: parseReminderBoardLines(existing.lines),
+          },
+    slots: reminder.slots,
+  });
+  if (!delivered.ok) {
+    await markNoticeError(prisma, batchId, delivered.error);
     return;
   }
-  const delivered = await deliverNotice(env, waPool, projectId, text);
-  if (delivered > 0) {
-    await prisma.postStatusNotice.update({
-      where: { batchId },
-      data: { postedAt: new Date(), body: text, error: null },
-    });
-    console.warn(
-      `[post-update] sent batch=${batchId} projectId=${projectId} recipients=${String(delivered)}`,
-    );
-    return;
-  }
-  await markNoticeError(prisma, batchId, text, "WhatsApp post-update was not accepted by any recipient");
+
+  await prisma.campaignReminderBoard.upsert({
+    where: { campaignId: reminder.campaignId },
+    create: {
+      campaignId: reminder.campaignId,
+      chatId: delivered.next.chatId,
+      messageId: delivered.next.messageId,
+      lines: reminderBoardLinesToJson(delivered.next.lines),
+      error: null,
+    },
+    update: {
+      chatId: delivered.next.chatId,
+      messageId: delivered.next.messageId,
+      lines: reminderBoardLinesToJson(delivered.next.lines),
+      error: null,
+    },
+  });
+  await prisma.postStatusNotice.update({
+    where: { batchId },
+    data: { postedAt: new Date(), body: delivered.text, error: null },
+  });
+  console.warn(
+    `[post-update] telegram board batch=${batchId} campaignId=${reminder.campaignId} telegramCalled=${String(delivered.telegramCalled)}`,
+  );
 }
 
 /**
@@ -207,125 +241,46 @@ async function claimNotice(prisma: PrismaClient, batchId: string): Promise<boole
 async function markNoticeError(
   prisma: PrismaClient,
   batchId: string,
-  body: string,
   error: string,
 ): Promise<void> {
   await prisma.postStatusNotice.update({
     where: { batchId },
-    data: { body, error, postedAt: null },
+    data: { error, postedAt: null },
   });
   console.warn(`[post-update] not sent batch=${batchId}: ${error}`);
 }
 
-/**
- * Sends the same text to every ops number on that project's linked WhatsApp account.
- * Returns how many numbers accepted the send.
- */
-async function deliverNotice(
-  env: ApiEnv,
-  waPool: WaConnectionPool,
-  projectId: string,
-  text: string,
-): Promise<number> {
-  const msisdns = env.NMCAS_FAILURE_NOTIFY_MSISDN;
-  if (msisdns.length === 0) {
-    return 0;
-  }
-  try {
-    await waPool.start(projectId);
-    if (!(await waPool.isSendReady(projectId))) {
-      return 0;
-    }
-    const wa = waPool.getManager(projectId);
-    let delivered = 0;
-    for (const msisdn of msisdns) {
-      try {
-        await wa.sendDirectText(toWhatsAppUserJid(msisdn), text);
-        delivered += 1;
-      } catch (err: unknown) {
-        console.warn(
-          `[post-update] recipient failed projectId=${projectId}:`,
-          err instanceof Error ? err.message : String(err),
-        );
-      }
-    }
-    return delivered;
-  } catch (err: unknown) {
-    console.warn(
-      `[post-update] WhatsApp send failed projectId=${projectId}:`,
-      err instanceof Error ? err.message : String(err),
-    );
-    return 0;
-  }
-}
-
-type StoredNoticeRow = {
-  groupName: string;
-  status: string;
-  error: string | null;
-  copyText: string | null;
+type StoredBoardRow = {
+  id: string;
+  campaignId: string | null;
   operatorKind: string | null;
-  valueFormat: string | null;
-  reminderFormat: string | null;
+  status: string;
   scheduledAt: Date;
   project: { name: string };
-  reminderTemplate: { name: string } | null;
-  type: string;
+  reminderTemplate: {
+    slotKey: string;
+    sortOrder: number;
+    scheduleRuleKind: string;
+    dayOffset: number | null;
+  } | null;
 };
 
-function toNoticeRow(row: StoredNoticeRow): PostUpdateNoticeRow | null {
-  const status = toRowStatus(row.status);
-  if (status === null) {
-    return null;
-  }
+/**
+ * Maps a database row into the pure collector input.
+ */
+function toBoardSource(row: StoredBoardRow): ReminderBatchSourceRow {
   return {
-    groupName: row.groupName,
-    status,
-    error: row.error,
-    copyText: row.copyText,
-    operatorKind: toOperatorKind(row.operatorKind),
-    valueFormat: toValueFormat(row.valueFormat),
-    reminderFormat: toReminderFormat(row.reminderFormat),
-    slotName: row.reminderTemplate?.name ?? null,
+    id: row.id,
+    campaignId: row.campaignId,
+    operatorKind: row.operatorKind,
+    status: row.status,
     scheduledAt: row.scheduledAt,
     projectName: row.project.name,
-    legacyType: row.type === "POLL" ? "POLL" : "POST",
+    slotKey: row.reminderTemplate?.slotKey ?? null,
+    sortOrder: row.reminderTemplate?.sortOrder ?? null,
+    scheduleRuleKind: row.reminderTemplate?.scheduleRuleKind ?? null,
+    dayOffset: row.reminderTemplate?.dayOffset ?? null,
   };
-}
-
-function toRowStatus(status: string): PostUpdateRowStatus | null {
-  if (
-    status === "PENDING" ||
-    status === "SENDING" ||
-    status === "SENT" ||
-    status === "FAILED" ||
-    status === "DRAFT" ||
-    status === "CANCELLED"
-  ) {
-    return status;
-  }
-  return null;
-}
-
-function toOperatorKind(value: string | null): PostUpdateNoticeRow["operatorKind"] {
-  if (value === "VALUE" || value === "REMINDER") {
-    return value;
-  }
-  return null;
-}
-
-function toValueFormat(value: string | null): PostUpdateNoticeRow["valueFormat"] {
-  if (value === "IMAGE_CAPTION" || value === "TEXT_ONLY" || value === "POLL") {
-    return value;
-  }
-  return null;
-}
-
-function toReminderFormat(value: string | null): PostUpdateNoticeRow["reminderFormat"] {
-  if (value === "IMAGE" || value === "TEXT" || value === "STICKER") {
-    return value;
-  }
-  return null;
 }
 
 function isUniqueConstraintError(err: unknown): boolean {

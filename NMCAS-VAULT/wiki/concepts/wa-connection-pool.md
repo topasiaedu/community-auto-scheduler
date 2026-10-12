@@ -1,8 +1,8 @@
 ---
 title: "WhatsApp connection pool (whatsmeow-node)"
 type: "concept"
-updated: "2026-08-27"
-sources: 10
+updated: "2026-10-12"
+sources: 11
 tags: ["whatsmeow", "whatsapp", "architecture", "nmcas"]
 ---
 
@@ -58,6 +58,7 @@ Two incidents the same day with overlapping UI:
 
 - **RAM-first boot** — QR channel opened but `qr` never fired when Go spawned under peer-client pressure. Fix: `openFreshQrPairing()`, max 3 retries, `POST /wa/pair-code`. Set **`WA_MAX_WARM_CLIENTS=1`** on 512 MB. Post-mortem: [[wiki/sources/2026-08-27-wa-qr-pairing-do512-incident-session]], [[wiki/concepts/wa-qr-pairing-low-ram]].
 - **Client outdated** — same `awaiting_scan` / 204 QR, but `/health` was fine. PM2: `err-client-outdated`. Fix: **whatsmeow-node 0.6.0 → 0.7.0** + restart. Pin and bump the npm package when WhatsApp expires the bundled version. Post-mortem: [[wiki/sources/2026-08-27-wa-qr-client-outdated-whatsmeow-upgrade]].
+- **Client outdated again (2026-10-12)** — same operator `lastError`; lockfile still on **0.7.0**. Repo pin **0.8.0** (`73489da`); `WaManager` stops reconnect/QR repair on `client_outdated`. Droplet `update-server` was left to the operator. Post-mortem: [[wiki/sources/2026-10-12-whatsmeow-client-outdated-0.8]]. Do not Clear session before the new binary is running.
 
 ---
 

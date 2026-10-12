@@ -52,4 +52,5 @@ Pinned **whatsmeow-node 0.6.0** (2026-04-24) while **0.7.0** existed on npm (202
 - [[wiki/concepts/wa-qr-pairing-low-ram]]
 - [[wiki/concepts/wa-connection-pool]]
 - [[wiki/sources/2026-08-27-wa-qr-pairing-do512-incident-session]]
+- [[wiki/sources/2026-10-12-whatsmeow-client-outdated-0.8]] — next occurrence: 0.7.0 → 0.8.0 (`73489da`)
 - [[wiki/overview]]

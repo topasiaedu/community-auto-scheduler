@@ -1,8 +1,8 @@
 ---
 title: "Entity: ScheduledMessage"
 type: "entity"
-updated: "2026-10-08"
-sources: 7
+updated: "2026-10-09"
+sources: 8
 tags: ["entity", "nmcas", "data-model"]
 ---
 
@@ -86,7 +86,7 @@ As of [[wiki/sources/2026-07-27-wa-reliability-always-on-plan]] **Stage B** (imp
 
 **Inverse (2026-09-09):** missing receipt is also not proof of non-delivery. RDW 4.0 Value (`cmtl74ex600gwe7o769yr5qfh`) got IPC accept (`waMessageId` `3EB0546133EC6E9CEC1F3D` at 11:00:49 MYT) then `FAILED` after 90s because the whatsmeow Go process exited before `message:receipt`. Same 11:00 fan-out: RDW / 3.0 / 5.0 / 6.0 `SENT`; RDW 2.0 `FAILED` with no id (`Go process exited with code null`). If the community already shows the post, do **not** Re-queue (duplicate risk). See [[wiki/sources/2026-09-09-rdw4-value-no-receipt-notify-vercel]].
 
-Value fan-out remains **one row per community** — each destination has its own id/receipt.
+Value fan-out remains **one row per community** — each destination has its own id/receipt. Rows from one fan-out share `fanOutBatchId`. Each reminder or single row has its own id. `PostStatusNotice` records one ops DM per batch (`postedAt` null until at least one number accepts). Re-queue assigns a new batch id. See [[wiki/sources/2026-10-09-post-update-whatsapp-ship]].
 
 ## P7 send routing (worker)
 
@@ -140,3 +140,4 @@ Full spec: [[wiki/concepts/campaign-message-schedule]], [[wiki/analysis/p7-ux-sp
 - [[wiki/sources/2026-09-09-rdw4-value-no-receipt-notify-vercel]]
 - [[wiki/analysis/telegram-post-status-delivery-tracking]] — linked-device receipts are per device; no source defines “visible in the community chat.”
 - [[wiki/analysis/telegram-post-status-implementation-plan]] — one WhatsApp post-update DM to the two ops numbers when a batch finishes; replaces the immediate failure DM.
+- [[wiki/sources/2026-10-09-post-update-whatsapp-ship]] — shipped as `4450312`; operator reported the droplet update; phone check still open.

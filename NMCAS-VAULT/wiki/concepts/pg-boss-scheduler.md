@@ -1,8 +1,8 @@
 ---
 title: "pg-boss job scheduler"
 type: "concept"
-updated: "2026-09-09"
-sources: 5
+updated: "2026-10-12"
+sources: 7
 tags: ["scheduling", "pg-boss", "postgres", "nmcas"]
 ---
 
@@ -29,7 +29,9 @@ tags: ["scheduling", "pg-boss", "postgres", "nmcas"]
 4. Worker reads the row, does a CAS `PENDING → SENDING` via `updateMany { WHERE status='PENDING' }` (PostgreSQL row-level lock — only one concurrent job can win).
 5. Worker sends via the project's WhatsApp client (whatsmeow-node).
 6. IPC success stores `waMessageId` and keeps `SENDING`. `SENT` waits for `message:receipt` (server ack). No receipt → `FAILED`. Queue Sent is **not** proof the community can see the post ([[wiki/sources/2026-09-09-starting-soon-false-sent-rdw6]]).
-7. On WA / timeout error: `markFailedWithNotify` → `FAILED` + WhatsApp DMs to every `NMCAS_FAILURE_NOTIFY_MSISDN` (defaults: `60139968817` and `60176782206`).
+7. On WA / timeout error: `markFailedWithNotify` writes `FAILED` only. It no longer sends the immediate failure DM.
+8. A post-update sweep (about once a minute) used to send **one** WhatsApp DM per `fanOutBatchId` to the same ops numbers after the batch settles. See [[wiki/sources/2026-10-09-post-update-whatsapp-ship]]. The repo now closes that DM and, for a Community Reminder, edits one Telegram board instead. The droplet still sends the DM until `update-server`. The daily digest is a separate in-process job. See [[wiki/analysis/telegram-reminder-status-board]].
+9. A separate in-process loop, not a pg-boss job, posts to the Telegram group **NMCAS Status Update** when a warm WhatsApp session stays down (about 3 minutes, or immediately on logout) and once when it can send again (`e04313e`). See [[wiki/sources/2026-10-12-telegram-wa-disconnect-alert]].
 
 ## Free-tier tuning (index.ts)
 
@@ -81,6 +83,7 @@ All jobs are one-off. Recurring scheduling is out of scope for V1.
 - Stability hardening: `raw/sources/2026-04-21-stability-hardening-session.md`
 - False SENT vs visible: `raw/sources/2026-09-09-starting-soon-false-sent-rdw6.md`
 - False FAILED / notify / Vercel: `raw/sources/2026-09-09-rdw4-value-no-receipt-notify-vercel.md`
+- Post-update DM replaces the immediate failure alert: `raw/sources/2026-10-09-post-update-whatsapp-ship.md`
 
 ## See also
 
@@ -89,4 +92,6 @@ All jobs are one-off. Recurring scheduling is out of scope for V1.
 - [[wiki/sources/2026-04-21-stability-hardening-session]]
 - [[wiki/sources/2026-09-09-starting-soon-false-sent-rdw6]]
 - [[wiki/sources/2026-09-09-rdw4-value-no-receipt-notify-vercel]]
+- [[wiki/sources/2026-10-09-post-update-whatsapp-ship]]
+- [[wiki/analysis/telegram-post-status-implementation-plan]]
 - [[wiki/overview]]

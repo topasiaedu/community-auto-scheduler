@@ -1,15 +1,16 @@
 ---
 title: "WhatsApp post-update notification — implementation plan"
 type: "analysis"
-updated: "2026-10-09"
-sources: 2
+updated: "2026-10-12"
+sources: 3
 tags: ["nmcas", "whatsapp", "notification", "implementation"]
 ---
 
 # WhatsApp post-update notification — implementation plan
 
-**Status:** Implemented 2026-10-09. Copy approved. This notification replaces the immediate failure alert. Live phone check still pending. Migration `20261009120000_post_status_notice` must be applied before the API process that includes this code starts.  
-**Replaces:** the Telegram “arrived in the community” plan previously on this page. That approach stays withdrawn. Research: [[wiki/analysis/telegram-post-status-delivery-tracking]].
+**Status:** On `main` as `4450312` (2026-10-09). Copy approved. This notification replaces the immediate failure alert. The operator reported `npm run update-server` on the droplet the same evening; `/health`, the new table, and a real DM were not re-checked in that chat. Phase 4 (both phones, one real post) is still open.  
+**Later change, in the repo, not on the droplet yet:** [[wiki/analysis/telegram-reminder-status-board]] stops this DM for reminders and Value posts. The daily digest stays. The droplet still sends this DM until `update-server`.  
+**Replaces:** the Telegram “arrived in the community” plan previously on this page. That approach stays withdrawn. Research: [[wiki/analysis/telegram-post-status-delivery-tracking]]. Ship note: [[wiki/sources/2026-10-09-post-update-whatsapp-ship]].
 
 ---
 
@@ -131,7 +132,7 @@ In `markFailedWithNotify` (`apps/api/src/worker/send-scheduled-message.ts`), kee
 
 Schedule a test post to one community. Confirm both phones get one message, the slot name and result match Queue, and a forced failure produces the Failed line without a second failure DM.
 
-**Done when:** that check is noted in the vault.
+**Done when:** that check is noted in the vault. Not done as of the 2026-10-09 ship note.
 
 ---
 

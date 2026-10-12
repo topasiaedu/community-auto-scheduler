@@ -1,8 +1,8 @@
 ---
 title: "NMCAS vault overview"
 type: "overview"
-updated: "2026-09-09"
-sources: 14
+updated: "2026-10-12"
+sources: 16
 tags: ["nmcas", "meta"]
 ---
 
@@ -38,7 +38,7 @@ Queue **Sent** means WhatsApp **server receipt**, not proof the community can se
 
 | Component | Host |
 |-----------|------|
-| API | **DigitalOcean** — `https://nmcas-server.nmmedia.app` (PM2, shared 512 MB Droplet + swap; port 3002 behind nginx) — see [[wiki/sources/2026-07-16-do-migration-oom-incident-session]]; keep **whatsmeow-node** current ([[wiki/sources/2026-08-27-wa-qr-client-outdated-whatsmeow-upgrade]]) |
+| API | **DigitalOcean** — `https://nmcas-server.nmmedia.app` (PM2, shared 512 MB Droplet + swap; port 3002 behind nginx) — see [[wiki/sources/2026-07-16-do-migration-oom-incident-session]]; keep **whatsmeow-node** current ([[wiki/sources/2026-08-27-wa-qr-client-outdated-whatsmeow-upgrade]], [[wiki/sources/2026-10-12-whatsmeow-client-outdated-0.8]] pin **0.8.0** as `73489da`; droplet restart may still be open) |
 | Web | Vercel — `community-auto-scheduler-web.vercel.app` — **GitHub Actions + CLI** deploys (`git.deploymentEnabled: false`); see [[wiki/concepts/vercel-github-actions-deploy]], [[wiki/sources/2026-08-26-vercel-private-repo-actions-cutover]] |
 | DB / Auth / post images | Supabase |
 | Render API (retired) | `community-auto-scheduler.onrender.com` — **suspended** after DO cutover (2026-07-16) |
@@ -67,7 +67,7 @@ See [[wiki/sources/2026-04-13-nmcas-prd-v1]] for full requirements. Out of scope
 | P2 | Post type end-to-end; WA link path stable — **complete** (see [[wiki/sources/2026-04-17-wa-p2-api-stability]]) |
 | P3 | Poll type — **complete** (`POST /messages` with `type: "POLL"`, worker `sendPollToWhatsApp`) |
 | P4 | Multi-project (connection pool, project switcher) — **complete** (see [[wiki/sources/2026-04-18-nmcas-implementation-snapshot]]) |
-| P5 | Failure notifications, live status, mobile responsive — **partial** (failure + digest DMs to default ops MSISDNs `60139968817` and `60176782206`; Re-queue button + FAILED confirmation dialog 2026-04-21; HTTP polling; UI overhaul deferred) |
+| P5 | Failure notifications, live status, mobile responsive — **partial** (daily digest plus one post-update DM per finished batch to `60139968817` and `60176782206`, `4450312`; immediate failure DM removed; Telegram group alert when a warm WhatsApp session stays down, `e04313e`, operator-confirmed 2026-10-12; Re-queue button + FAILED confirmation dialog 2026-04-21; HTTP polling; UI overhaul deferred; live phone check of the post-update still open). The repo now stops that post-update DM and posts Community Reminder status on the Telegram board. The droplet still runs the old DM until `update-server`: [[wiki/analysis/telegram-reminder-status-board]]. |
 | P6 | Hardening, deployment, env config — **substantially complete** (rescue sweep, duplicate-send fix, race guards, 2026-04-21; Docker + Vercel + Render live 2026-07; see [[wiki/sources/2026-04-21-stability-hardening-session]], [[wiki/sources/2026-07-06-whatsmeow-deploy-product-ux-session]]) |
 | P7 | Value / Reminder + campaign scheduler — **shipped on main** `8f7d1c1` (2026-07-08); live E2E pending deploy/migration ([[wiki/sources/2026-07-08-p7-campaign-scheduler-ship-session]], [[wiki/analysis/p7-implementation-plan]], [[wiki/analysis/p7-ux-spec]]) |
 
@@ -82,6 +82,7 @@ See [[wiki/sources/2026-04-13-nmcas-prd-v1]] for full requirements. Out of scope
 - [[wiki/concepts/vercel-github-actions-deploy]]
 - [[wiki/entities/project]]
 - [[wiki/entities/scheduled-message]]
+- [[wiki/analysis/telegram-reminder-status-board]]
 - [[wiki/sources/2026-04-13-nmcas-prd-v1]]
 - [[wiki/sources/2026-04-16-p0-spike-completion]]
 - [[wiki/sources/2026-04-17-wa-p2-api-stability]]
@@ -95,3 +96,5 @@ See [[wiki/sources/2026-04-13-nmcas-prd-v1]] for full requirements. Out of scope
 - [[wiki/sources/2026-08-27-queue-draft-resume-imageurl-session]]
 - [[wiki/sources/2026-09-09-starting-soon-false-sent-rdw6]]
 - [[wiki/sources/2026-09-09-rdw4-value-no-receipt-notify-vercel]]
+- [[wiki/sources/2026-10-09-post-update-whatsapp-ship]]
+- [[wiki/sources/2026-10-12-telegram-wa-disconnect-alert]]

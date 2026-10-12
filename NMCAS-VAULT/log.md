@@ -198,3 +198,48 @@ Append-only timeline of ingests, filed queries, and lint passes. Newest entries 
 - Question: Implement the approved post-update plan.
 - Answer filed: [[wiki/analysis/telegram-post-status-implementation-plan]]
 - Notes: Code in API. One DM per `fanOutBatchId` after the batch settles. Immediate failure DM removed. Formatter tests pass. Live send to the two phones not run. Migration `20261009120000_post_status_notice` not applied from this session.
+
+## [2026-10-09] ingest | WhatsApp post-update shipped
+- Raw: `raw/sources/2026-10-09-post-update-whatsapp-ship.md`
+- Wiki: [[wiki/sources/2026-10-09-post-update-whatsapp-ship]], [[wiki/analysis/telegram-post-status-implementation-plan]], [[wiki/concepts/pg-boss-scheduler]], [[wiki/entities/scheduled-message]], [[wiki/entities/project]], [[wiki/overview]], [[index]]
+- Notes: Operator asked for a raw file of this chat. Commit `4450312` on `main`. Immediate failure DM removed. Operator reported `npm run update-server` as done; health, migration, and a live DM were not re-checked. Phase 4 still open.
+
+## [2026-10-12] query | Telegram alert when WhatsApp disconnects
+- Question: Can NMCAS send a Telegram group reminder when WhatsApp is not connected or disconnects, and write the plan with BotFather steps, chat id, phases, checklists, and definition of done?
+- Answer filed: [[wiki/analysis/telegram-wa-disconnect-alert]]
+- Notes: Owner chose a 3-minute grace, an immediate alert on logout, and one back-online message. Distinct from the withdrawn Telegram “arrived in the community” plan. No code in this session.
+
+## [2026-10-12] query | Telegram WA alert phases 0–3
+- Question: Phase 0 (bot, group **NMCAS Status Update**, test message) is done. Build the API alert.
+- Answer filed: [[wiki/analysis/telegram-wa-disconnect-alert]]
+- Notes: Code in the API. Grace 3 minutes, immediate on logout and client-outdated, one recovery message after a delivered down alert. `npm test` in `apps/api` passed. Token and chat id are not in git. Phase 4 (droplet `.env` and one live outage) still open.
+
+## [2026-10-12] ingest | Telegram alert when WhatsApp disconnects
+- Raw: `raw/sources/2026-10-12-telegram-wa-disconnect-alert.md`
+- Wiki: [[wiki/sources/2026-10-12-telegram-wa-disconnect-alert]], [[wiki/analysis/telegram-wa-disconnect-alert]], [[wiki/concepts/pg-boss-scheduler]], [[wiki/entities/project]], [[wiki/overview]], [[index]]
+- Notes: Commit `e04313e`. Group **NMCAS Status Update**. Token stays in droplet `.env`; `update-server` does not copy it. First server test was empty because the PC `.env` was edited. Operator later said the live WhatsApp check and Telegram send run correctly. This chat did not see the message. Recovery message not confirmed.
+
+## [2026-10-12] ingest | WhatsApp client outdated — whatsmeow 0.8.0
+- Raw: `raw/sources/2026-10-12-whatsmeow-client-outdated-0.8.md`
+- Wiki: [[wiki/sources/2026-10-12-whatsmeow-client-outdated-0.8]], [[wiki/concepts/wa-connection-pool]], [[wiki/sources/2026-08-27-wa-qr-client-outdated-whatsmeow-upgrade]], [[wiki/overview]], [[index]]
+- Notes: Same class as 27 Aug. Repo pin **0.8.0** + `client_outdated` reconnect stop as `73489da` on `main`. Live `/health` was fine before deploy. Operator must run `update-server` before Clear session; if 0.8.0 still 405s, wait for a newer binding.
+
+## [2026-10-12] ingest | Telegram alert red and green wording
+- Raw: `raw/sources/2026-10-12-telegram-alert-message-wording.md`
+- Wiki: [[wiki/sources/2026-10-12-telegram-wa-disconnect-alert]], [[wiki/analysis/telegram-wa-disconnect-alert]], [[index]]
+- Notes: Commit `c7d5448` on `main`, pushed. Down message starts with 🔴. Recovery starts with 🟢. `[NMCAS]` removed. Droplet not restarted in this chat.
+
+## [2026-10-12] query | Community Reminder status board
+- Question: Automate the Community Reminder status in the Telegram group, one growing message per webinar, and stop the WhatsApp post-update DMs while keeping the daily digest.
+- Answer filed: [[wiki/analysis/telegram-reminder-status-board]]
+- Notes: Plan only. Failed lines stay failed. Same bot and group as the disconnect alert. No code in this session.
+
+## [2026-10-12] query | Reminder board previous lines become Sent
+- Question: When the next Community Reminder slot finishes, mark every earlier board line as Sent, because a failed reminder is sent by hand before then.
+- Answer filed: [[wiki/analysis/telegram-reminder-status-board]]
+- Notes: Only the newest line uses the Queue result. Older Failed lines flip to Sent in that edit. The Queue row is left as Failed. No code in this session.
+
+## [2026-10-12] query | Community Reminder board phases 1–4
+- Question: Implement the Telegram Community Reminder board and stop WhatsApp post-update DMs.
+- Answer filed: [[wiki/analysis/telegram-reminder-status-board]]
+- Notes: Formatter, `editMessageText`, `CampaignReminderBoard`, and the post-update sweep. Daily digest unchanged. `npm test` in `apps/api` passed (131 tests). Phase 5 (droplet and a real board in the group) is open.

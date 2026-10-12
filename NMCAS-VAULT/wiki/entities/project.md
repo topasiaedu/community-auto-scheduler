@@ -1,8 +1,8 @@
 ---
 title: "Entity: Project"
 type: "entity"
-updated: "2026-09-09"
-sources: 3
+updated: "2026-10-12"
+sources: 5
 tags: ["entity", "nmcas", "data-model"]
 ---
 
@@ -47,9 +47,11 @@ model Project {
 - Settings: `sopUrl`, `campaignNote`, Reminder template library
 - Switching projects changes WA session, queue, and templates
 
-## Failure / digest notify (2026-09-09)
+## Ops notify (2026-10-12)
 
-`NotifyRecipient` exists on the project but is **unused** (empty in production). Ops WhatsApp DMs for `FAILED` sends and the daily digest use `NMCAS_FAILURE_NOTIFY_MSISDN` parsed by `resolveNotifyMsisdns`. Defaults always include `60139968817` and `60176782206`. Alerts go as 1:1 chats via the **same project's** WhatsApp session, not into the community. See [[wiki/sources/2026-09-09-rdw4-value-no-receipt-notify-vercel]].
+`NotifyRecipient` exists on the project but is **unused** (empty in production). The daily digest and the post-update DM use `NMCAS_FAILURE_NOTIFY_MSISDN` parsed by `resolveNotifyMsisdns`. Defaults always include `60139968817` and `60176782206`. Messages go as 1:1 chats via the **same project's** WhatsApp session, not into the community. As of `4450312`, a finished scheduled batch sends one post-update DM; the immediate per-row failure DM is gone.
+
+A warm session that stays disconnected also alerts the Telegram group **NMCAS Status Update** (`e04313e`). The bot token and chat id are droplet `.env` only. `update-server` does not copy them. See [[wiki/sources/2026-09-09-rdw4-value-no-receipt-notify-vercel]], [[wiki/sources/2026-10-09-post-update-whatsapp-ship]], [[wiki/sources/2026-10-12-telegram-wa-disconnect-alert]].
 
 ## API
 
@@ -61,6 +63,8 @@ model Project {
 - Grounded in: `raw/sources/2026-04-13-nmcas-prd-v1.md`
 - P7 extensions: [[wiki/analysis/p7-implementation-plan]], [[wiki/analysis/p7-ux-spec]]
 - Notify defaults: `raw/sources/2026-09-09-rdw4-value-no-receipt-notify-vercel.md`
+- Post-update DM: `raw/sources/2026-10-09-post-update-whatsapp-ship.md`
+- Telegram disconnect alert: `raw/sources/2026-10-12-telegram-wa-disconnect-alert.md`
 
 ## See also
 

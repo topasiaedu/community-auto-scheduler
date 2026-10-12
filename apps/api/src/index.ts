@@ -220,7 +220,7 @@ async function main(): Promise<void> {
   /** Every 60s → Render logs; also exposed live on GET /health → memory. */
   stopMemoryLogger = startMemoryLogger(waPool, 60_000);
   stopDailyDigest = startDailyDigest(prisma, env, waPool);
-  stopPostUpdateSweep = startPostUpdateSweep(prisma, env, waPool);
+  stopPostUpdateSweep = startPostUpdateSweep(prisma, env);
   stopWaLinkAlert = startWaLinkAlert(prisma, env, waPool);
 
   await fastify.listen({ port: env.PORT, host: "0.0.0.0" });

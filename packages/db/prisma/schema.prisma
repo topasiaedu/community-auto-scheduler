@@ -96,8 +96,22 @@ model Campaign {
   customValues      Json
   createdAt         DateTime           @default(now())
   messages          ScheduledMessage[]
+  reminderBoard     CampaignReminderBoard?
 
   @@index([projectId])
+}
+
+/// One Telegram status message per campaign. Lines are append-only; the formatter decides which mark to show.
+model CampaignReminderBoard {
+  campaignId String   @id
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  chatId     String
+  /// Telegram message_id of the board in that chat. Null until the first send is stored.
+  messageId  Int?
+  lines      Json
+  error      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 }
 
 model ReminderTemplate {
@@ -169,7 +183,8 @@ model ScheduledMessage {
   @@index([fanOutBatchId])
 }
 
-/// One WhatsApp post-update DM per fan-out batch. `postedAt` stays null until a recipient accepts it.
+/// One handled fan-out batch. `postedAt` stays null until the sweep finishes it.
+/// A Community Reminder batch waits for the Telegram board. Other batches are closed with no WhatsApp DM.
 model PostStatusNotice {
   id        String    @id @default(cuid())
   batchId   String    @unique

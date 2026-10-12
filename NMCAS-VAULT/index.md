@@ -32,6 +32,10 @@ Catalog of all wiki pages. Updated after every ingest, filed query, or lint pass
 - [[wiki/sources/2026-08-27-queue-draft-resume-imageurl-session]] — Queue Resume no-op + fan-out POST on draft; fixes `205569d` / `9f71e25` (navigate + PATCH).
 - [[wiki/sources/2026-09-09-starting-soon-false-sent-rdw6]] — RDW 6.0 Starting Soon 11:00 SENT in Queue, not visible; LIVE NOW/sticker/Value landed; Stage B server ack ≠ group visible.
 - [[wiki/sources/2026-09-09-rdw4-value-no-receipt-notify-vercel]] — RDW 4.0 Value 11:00 FAILED no receipt after Go crash; second ops notify number; Vercel pnpm ENOENT fix.
+- [[wiki/sources/2026-10-09-post-update-whatsapp-ship]] — Post-update DM shipped as `4450312`; replaces the immediate failure alert; operator reported droplet update; phone check still open.
+- [[wiki/sources/2026-10-12-telegram-wa-disconnect-alert]] — Telegram group alert when WhatsApp stays down; `e04313e`; droplet `.env` is not copied by `update-server`; operator said the live send works.
+- [[wiki/sources/2026-10-12-whatsmeow-client-outdated-0.8]] — Client outdated again; whatsmeow-node **0.7.0 → 0.8.0** on `main` (`73489da`); do not Clear session before droplet `update-server`.
+- `raw/sources/2026-10-12-telegram-alert-message-wording.md` — Red and green Telegram alert text; commit `c7d5448`; droplet not restarted for this wording.
 - `raw/sources/2026-07-10-p8a-late-campaign-partial-schedule.md` — P8-A agent brief: skip past / explicit Welcome skip for Show Up campaigns.
 - `raw/sources/2026-07-10-p8b-value-fan-out-active-communities.md` — P8-B agent brief: Value fan-out from Single message + active communities in Settings.
 
@@ -43,17 +47,17 @@ Catalog of all wiki pages. Updated after every ingest, filed query, or lint pass
 - [[wiki/concepts/compounding-knowledge-base]] — LLM Wiki as persistent compiled layer; ingest / query / lint.
 - [[wiki/concepts/value-vs-reminder-messages]] — Operator model: Value post (fresh copy, poll nested) vs Reminder (SOP assets, stickers, countdowns).
 - [[wiki/concepts/multi-project-architecture]] — Project as top-level entity; how resources are scoped per project.
-- [[wiki/concepts/wa-connection-pool]] — whatsmeow-node pool; SQLite + WhatsAppSessionBlob; always-on + QR pairing RAM notes (2026-08-27).
+- [[wiki/concepts/wa-connection-pool]] — whatsmeow-node pool; SQLite + WhatsAppSessionBlob; always-on + QR pairing RAM notes; client-outdated bumps (0.7→0.8 on 2026-10-12).
 - [[wiki/concepts/wa-qr-pairing-low-ram]] — QR / phone pairing on 512 MB DO; RAM-first boot vs client-outdated 405; env tuning.
-- [[wiki/concepts/pg-boss-scheduler]] — pg-boss Postgres-backed job queue; rescue sweep; requeue; receipt-gated SENT/FAILED; ops notify DMs.
+- [[wiki/concepts/pg-boss-scheduler]] — pg-boss Postgres-backed job queue; rescue sweep; requeue; receipt-gated SENT/FAILED; post-update DM; Telegram disconnect alert is a separate loop.
 - [[wiki/concepts/vercel-github-actions-deploy]] — Private-repo web deploys via Actions + CLI token; native Git disabled; npm-only lockfile (no pnpm).
 
 ---
 
 ## Entities
 
-- [[wiki/entities/project]] — Project data model: owns sessions, messages, unused NotifyRecipient table; ops DMs via env defaults.
-- [[wiki/entities/scheduled-message]] — ScheduledMessage: Value/Reminder; receipt-gated SENT (server ack); Stage C echo not implemented; false SENT (RDW 6.0) and false FAILED (RDW 4.0).
+- [[wiki/entities/project]] — Project data model: owns sessions, messages, unused NotifyRecipient table; ops WhatsApp DMs via env defaults; Telegram disconnect alert via droplet `.env`.
+- [[wiki/entities/scheduled-message]] — ScheduledMessage: Value/Reminder; receipt-gated SENT (server ack); `fanOutBatchId` groups one post-update DM; false SENT (RDW 6.0) and false FAILED (RDW 4.0).
 
 ---
 
@@ -62,9 +66,11 @@ Catalog of all wiki pages. Updated after every ingest, filed query, or lint pass
 - [[wiki/analysis/p7-implementation-plan]] — P7 build plan: schema, API, worker, phases 1–7.
 - [[wiki/analysis/p7-ux-spec]] — P7 agent-ready UX + API: wizard, validation, contracts, acceptance matrix.
 - [[wiki/analysis/telegram-post-status-delivery-tracking]] — Primary sources: no signal means “visible in the group”; server ack vs typed receipt; Announcements are groups, not newsletters.
-- [[wiki/analysis/telegram-post-status-implementation-plan]] — WhatsApp post-update plan: one DM to the two ops numbers when a scheduled batch finishes (Sent or Failed). Telegram arrival plan withdrawn.
+- [[wiki/analysis/telegram-post-status-implementation-plan]] — WhatsApp post-update: one DM when a batch finishes; on `main` as `4450312`; live phone check still open. Telegram arrival plan withdrawn.
+- [[wiki/analysis/telegram-wa-disconnect-alert]] — Telegram group alert when a warm WhatsApp session stays down. On `main` as `e04313e`. Operator confirmed the live send; recovery message not separately confirmed.
+- [[wiki/analysis/telegram-reminder-status-board]] — Community Reminder Telegram board: phases 1–4 in the repo; WhatsApp post-update DMs stop once the droplet is updated; daily digest stays. Phase 5 (live group) is open.
 - `CLAUDE.md` — Schema and agent rules (see vault root).
 
 ---
 
-*Last indexed: 2026-10-09 — Post-update plan switched from Telegram to a WhatsApp DM.*
+*Last indexed: 2026-10-12 — Community Reminder Telegram board phases 1–4 implemented. Droplet update still open.*

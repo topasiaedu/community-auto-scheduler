@@ -22,6 +22,7 @@ import {
   type MediaDownloadPayload,
 } from "../lib/mediaDownloadCache.js";
 import { isTransientWaDisconnectError } from "../lib/transientWaError.js";
+import { isStatusOnlyGroup } from "../lib/statusOnlyGroup.js";
 import {
   DEFAULT_WA_RECEIPT_TIMEOUT_MS,
   buildNoReceiptErrorMessage,
@@ -520,6 +521,17 @@ async function processOneJob(
     return;
   }
   if (row.status !== "PENDING" && row.status !== "SENDING") {
+    return;
+  }
+
+  if (isStatusOnlyGroup(row.groupJid)) {
+    const marked = await prisma.scheduledMessage.updateMany({
+      where: { id: row.id, status: { in: ["PENDING", "SENDING"] } },
+      data: { status: "SENT", sentAt: new Date(), error: null },
+    });
+    console.warn(
+      `[send-worker] status-only, WhatsApp skipped id=${row.id} marked=${String(marked.count)}`,
+    );
     return;
   }
 

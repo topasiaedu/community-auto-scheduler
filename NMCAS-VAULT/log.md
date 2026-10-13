@@ -248,3 +248,8 @@ Append-only timeline of ingests, filed queries, and lint passes. Newest entries 
 - Question: Why did the Telegram group get status updates when nothing is scheduled?
 - Answer filed: [[wiki/analysis/telegram-reminder-status-board]]
 - Notes: The first restart announced past Sent/Failed reminders that had no closed notice. Fix skips slots scheduled more than 30 minutes before process start. Droplet still needs `update-server`.
+
+## [2026-10-13] query | Status-only reminder for a Telegram test
+- Question: Schedule a reminder that does not post to any WhatsApp group, and still updates the Telegram status at that time.
+- Answer filed: [[wiki/analysis/telegram-reminder-status-board]]
+- Notes: Worker treats `status-only@nmcas` as Sent with no WhatsApp send. Script `apps/api/src/scripts/schedule-status-only.ts`. Run it on the droplet only after this build is deployed.

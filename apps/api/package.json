@@ -7,7 +7,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "npm run build && node --test dist/lib/campaignSchedule.test.js dist/lib/campaignSlotSkip.test.js dist/lib/compressPostImage.test.js dist/lib/dailyDigest.test.js dist/lib/mediaDownloadCache.test.js dist/lib/notifyMsisdn.test.js dist/lib/postUpdateNotice.test.js dist/lib/reminderStatusBoard.test.js dist/lib/telegramNotify.test.js dist/lib/transientWaError.test.js dist/lib/waLinkAlert.test.js dist/lib/valueFanOut.test.js dist/lib/waAlwaysOnHelpers.test.js dist/lib/waEngagement.test.js dist/lib/waQrPairing.test.js dist/lib/waReceipt.test.js dist/lib/whatsappTextFormat.test.js",
+    "test": "npm run build && node --test dist/lib/campaignSchedule.test.js dist/lib/campaignSlotSkip.test.js dist/lib/compressPostImage.test.js dist/lib/dailyDigest.test.js dist/lib/mediaDownloadCache.test.js dist/lib/notifyMsisdn.test.js dist/lib/postUpdateNotice.test.js dist/lib/reminderStatusBoard.test.js dist/lib/statusOnlyGroup.test.js dist/lib/telegramNotify.test.js dist/lib/transientWaError.test.js dist/lib/waLinkAlert.test.js dist/lib/valueFanOut.test.js dist/lib/waAlwaysOnHelpers.test.js dist/lib/waEngagement.test.js dist/lib/waQrPairing.test.js dist/lib/waReceipt.test.js dist/lib/whatsappTextFormat.test.js",
     "start": "node dist/index.js"
   },
   "dependencies": {

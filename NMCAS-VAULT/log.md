@@ -243,3 +243,8 @@ Append-only timeline of ingests, filed queries, and lint passes. Newest entries 
 - Question: Implement the Telegram Community Reminder board and stop WhatsApp post-update DMs.
 - Answer filed: [[wiki/analysis/telegram-reminder-status-board]]
 - Notes: Formatter, `editMessageText`, `CampaignReminderBoard`, and the post-update sweep. Daily digest unchanged. `npm test` in `apps/api` passed (131 tests). Phase 5 (droplet and a real board in the group) is open.
+
+## [2026-10-12] query | Old reminders announced after server update
+- Question: Why did the Telegram group get status updates when nothing is scheduled?
+- Answer filed: [[wiki/analysis/telegram-reminder-status-board]]
+- Notes: The first restart announced past Sent/Failed reminders that had no closed notice. Fix skips slots scheduled more than 30 minutes before process start. Droplet still needs `update-server`.

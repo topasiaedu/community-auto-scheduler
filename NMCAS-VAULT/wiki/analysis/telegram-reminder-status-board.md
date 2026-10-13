@@ -8,7 +8,8 @@ tags: ["nmcas", "telegram", "reminder", "implementation"]
 
 # Community Reminder status board
 
-**Status:** Phases 1–4 are in the repo (2026-10-12). `npm test` in `apps/api` passed (131 tests, 0 failed). Not on the droplet yet. Phase 5 is still open.  
+**Status:** Phases 1–4 are on `main` as `06558bc` and were restarted on the droplet. Phase 5 (a real upcoming slot) is still open.  
+**Backfill:** that restart announced old finished reminders that had no closed notice. The follow-up skips any reminder scheduled more than 30 minutes before the process started and closes it with no Telegram message. The droplet keeps announcing old rows until `update-server` runs this build.  
 **Same bot and group** as the WhatsApp disconnect alert: `@nmcas_status_bot` in **NMCAS Status Update**. No new BotFather setup. See [[wiki/analysis/telegram-wa-disconnect-alert]].  
 **Stops** the WhatsApp `[NMCAS] Post update` private message for Community Reminders and for Value posts, once this build is running on the server. Until then that DM still goes out. See [[wiki/analysis/telegram-post-status-implementation-plan]].  
 **Keeps** the morning WhatsApp daily digest to `60139968817` and `60176782206`.

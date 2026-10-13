@@ -15,6 +15,12 @@ const MYT_TIME_ZONE = "Asia/Kuala_Lumpur";
 const SENT_MARK = "🟢Sent";
 const FAILED_MARK = "🔴Failed";
 
+/**
+ * How far before this process started a reminder may still be announced.
+ * Older Sent or Failed rows are closed with no Telegram message.
+ */
+export const REMINDER_BOARD_LOOKBACK_MS = 30 * 60 * 1000;
+
 /** Board names. These stay fixed when a template is renamed in Settings. */
 const BOARD_SLOT_NAMES: Record<string, string> = {
   welcome: "Welcome",
@@ -76,6 +82,31 @@ export type CollectedReminderBoard = {
 export type DeliverReminderBoardResult =
   | { ok: true; text: string; next: ReminderBoardSnapshot; telegramCalled: boolean }
   | { ok: false; error: string };
+
+/**
+ * True when this slot is recent enough to announce.
+ * `notBeforeMs` is the process start minus {@link REMINDER_BOARD_LOOKBACK_MS}.
+ */
+export function shouldPublishReminderBoard(scheduledAt: Date, notBeforeMs: number): boolean {
+  const at = scheduledAt.getTime();
+  return Number.isFinite(at) && Number.isFinite(notBeforeMs) && at >= notBeforeMs;
+}
+
+/**
+ * True when any slot in the batch is recent enough to announce.
+ * A batch of only older slots must be closed without Telegram.
+ */
+export function reminderBatchIsCurrent(
+  scheduledAts: readonly Date[],
+  notBeforeMs: number,
+): boolean {
+  for (const scheduledAt of scheduledAts) {
+    if (shouldPublishReminderBoard(scheduledAt, notBeforeMs)) {
+      return true;
+    }
+  }
+  return false;
+}
 
 /**
  * Turns a settled reminder batch into board slots, or null when this batch is not a campaign reminder.

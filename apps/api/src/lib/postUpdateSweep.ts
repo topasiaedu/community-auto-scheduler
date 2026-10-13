@@ -12,9 +12,14 @@ import {
   collectReminderBoard,
   deliverReminderBoard,
   parseReminderBoardLines,
+  REMINDER_BOARD_LOOKBACK_MS,
+  reminderBatchIsCurrent,
   reminderBoardLinesToJson,
   type ReminderBatchSourceRow,
 } from "./reminderStatusBoard.js";
+
+/** Captured when this process loads. Slots scheduled well before this are not announced. */
+const processStartedAtMs = Date.now();
 
 /** How long a claimed notice stays owned before another sweep may retry a failed DM. */
 const CLAIM_STALE_MS = 2 * 60_000;
@@ -161,6 +166,17 @@ async function settleBatch(
       data: { postedAt: new Date(), body: "", error: null },
     });
     console.warn(`[post-update] closed without WhatsApp DM batch=${batchId}`);
+    return;
+  }
+
+  const notBeforeMs = processStartedAtMs - REMINDER_BOARD_LOOKBACK_MS;
+  const scheduledAts = reminder.slots.map((slot) => slot.scheduledAt);
+  if (!reminderBatchIsCurrent(scheduledAts, notBeforeMs)) {
+    await prisma.postStatusNotice.update({
+      where: { batchId },
+      data: { postedAt: new Date(), body: "", error: null },
+    });
+    console.warn(`[post-update] skipped old reminder board batch=${batchId}`);
     return;
   }
 

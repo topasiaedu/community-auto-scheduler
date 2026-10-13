@@ -7,6 +7,7 @@ import {
   collectReminderBoard,
   deliverReminderBoard,
   formatReminderStatusBoard,
+  reminderBatchIsCurrent,
   type ReminderBatchSourceRow,
   type ReminderBoardSlotInput,
 } from "./reminderStatusBoard.js";
@@ -194,6 +195,22 @@ describe("appendReminderBoardLines", () => {
     if (kept !== undefined) {
       assert.equal(kept.queueResult, "FAILED");
     }
+  });
+});
+
+describe("reminderBatchIsCurrent", () => {
+  it("skips a reminder that finished before this process started", () => {
+    const startedAt = mytInstant("2026-10-12", "19:00").getTime();
+    const notBefore = startedAt - 30 * 60 * 1000;
+    const oldSlot = mytInstant("2026-10-08", "15:00");
+    assert.equal(reminderBatchIsCurrent([oldSlot], notBefore), false);
+  });
+
+  it("announces a reminder scheduled after startup", () => {
+    const startedAt = mytInstant("2026-10-12", "19:00").getTime();
+    const notBefore = startedAt - 30 * 60 * 1000;
+    const liveSlot = mytInstant("2026-10-12", "19:10");
+    assert.equal(reminderBatchIsCurrent([liveSlot], notBefore), true);
   });
 });
 

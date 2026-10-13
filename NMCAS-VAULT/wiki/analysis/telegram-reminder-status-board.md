@@ -1,7 +1,7 @@
 ---
 title: "Community Reminder status board"
 type: "analysis"
-updated: "2026-10-12"
+updated: "2026-10-13"
 sources: 0
 tags: ["nmcas", "telegram", "reminder", "implementation"]
 ---
@@ -9,7 +9,7 @@ tags: ["nmcas", "telegram", "reminder", "implementation"]
 # Community Reminder status board
 
 **Status:** Phases 1–4 are on `main` as `06558bc` and were restarted on the droplet. Phase 5 (a real upcoming slot) is still open.  
-**Backfill:** that restart announced old finished reminders that had no closed notice. The follow-up skips any reminder scheduled more than 30 minutes before the process started and closes it with no Telegram message. The droplet keeps announcing old rows until `update-server` runs this build.  
+**Backfill:** that restart announced old finished reminders that had no closed notice. The follow-up skips reminders from before the startup window and closes them with no Telegram message. A later status-only test was marked Sent and skipped WhatsApp, but the sweep kept reading 40 batches that were already closed, so the new batch never reached Telegram. The sweep now takes the newest unfinished batches. A restart can still announce a reminder from the last 6 hours.  
 **Same bot and group** as the WhatsApp disconnect alert: `@nmcas_status_bot` in **NMCAS Status Update**. No new BotFather setup. See [[wiki/analysis/telegram-wa-disconnect-alert]].  
 **Stops** the WhatsApp `[NMCAS] Post update` private message for Community Reminders and for Value posts, once this build is running on the server. Until then that DM still goes out. See [[wiki/analysis/telegram-post-status-implementation-plan]].  
 **Keeps** the morning WhatsApp daily digest to `60139968817` and `60176782206`.

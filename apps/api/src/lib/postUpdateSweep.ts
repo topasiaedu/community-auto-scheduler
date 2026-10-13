@@ -12,7 +12,7 @@ import {
   collectReminderBoard,
   deliverReminderBoard,
   parseReminderBoardLines,
-  REMINDER_BOARD_LOOKBACK_MS,
+  reminderAnnounceNotBeforeMs,
   reminderBatchIsCurrent,
   reminderBoardLinesToJson,
   type ReminderBatchSourceRow,
@@ -89,33 +89,32 @@ async function assignLegacyBatchIds(prisma: PrismaClient): Promise<void> {
 }
 
 /**
- * Batch ids that have at least one Sent or Failed row and no delivered notice yet.
+ * Newest Sent or Failed batches that do not yet have a delivered notice.
+ * Already-closed batches are excluded in SQL so a large history cannot hide a new one.
  */
 async function listCandidateBatchIds(prisma: PrismaClient): Promise<string[]> {
-  const rows = await prisma.scheduledMessage.findMany({
-    where: {
-      fanOutBatchId: { not: null },
-      status: { in: ["SENT", "FAILED"] },
-    },
-    distinct: ["fanOutBatchId"],
-    select: { fanOutBatchId: true },
-    take: 40,
-  });
+  const rows = await prisma.$queryRaw<Array<{ batchId: string | null }>>`
+    SELECT s."fanOutBatchId" AS "batchId"
+    FROM "ScheduledMessage" s
+    WHERE s.status IN ('SENT', 'FAILED')
+      AND s."fanOutBatchId" IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1
+        FROM "PostStatusNotice" n
+        WHERE n."batchId" = s."fanOutBatchId"
+          AND n."postedAt" IS NOT NULL
+      )
+    GROUP BY s."fanOutBatchId"
+    ORDER BY MAX(s."scheduledAt") DESC
+    LIMIT ${MAX_BATCHES_PER_SWEEP}
+  `;
   const batchIds: string[] = [];
   for (const row of rows) {
-    if (row.fanOutBatchId !== null && row.fanOutBatchId.length > 0) {
-      batchIds.push(row.fanOutBatchId);
+    if (typeof row.batchId === "string" && row.batchId.length > 0) {
+      batchIds.push(row.batchId);
     }
   }
-  if (batchIds.length === 0) {
-    return [];
-  }
-  const posted = await prisma.postStatusNotice.findMany({
-    where: { batchId: { in: batchIds }, postedAt: { not: null } },
-    select: { batchId: true },
-  });
-  const done = new Set(posted.map((notice) => notice.batchId));
-  return batchIds.filter((id) => !done.has(id)).slice(0, MAX_BATCHES_PER_SWEEP);
+  return batchIds;
 }
 
 /**
@@ -169,7 +168,7 @@ async function settleBatch(
     return;
   }
 
-  const notBeforeMs = processStartedAtMs - REMINDER_BOARD_LOOKBACK_MS;
+  const notBeforeMs = reminderAnnounceNotBeforeMs(processStartedAtMs, Date.now());
   const scheduledAts = reminder.slots.map((slot) => slot.scheduledAt);
   if (!reminderBatchIsCurrent(scheduledAts, notBeforeMs)) {
     await prisma.postStatusNotice.update({

@@ -21,6 +21,12 @@ const FAILED_MARK = "🔴Failed";
  */
 export const REMINDER_BOARD_LOOKBACK_MS = 30 * 60 * 1000;
 
+/**
+ * How far before now a missed reminder may still be announced after a restart.
+ * Covers a sweep that did not run, without reopening reminders from earlier days.
+ */
+export const REMINDER_BOARD_RECENT_MS = 6 * 60 * 60 * 1000;
+
 /** Board names. These stay fixed when a template is renamed in Settings. */
 const BOARD_SLOT_NAMES: Record<string, string> = {
   welcome: "Welcome",
@@ -90,6 +96,22 @@ export type DeliverReminderBoardResult =
 export function shouldPublishReminderBoard(scheduledAt: Date, notBeforeMs: number): boolean {
   const at = scheduledAt.getTime();
   return Number.isFinite(at) && Number.isFinite(notBeforeMs) && at >= notBeforeMs;
+}
+
+/**
+ * Earliest scheduled time that may still be announced.
+ * Uses the older of the startup lookback and the recent-miss window.
+ */
+export function reminderAnnounceNotBeforeMs(processStartedAtMs: number, nowMs: number): number {
+  const fromStart = processStartedAtMs - REMINDER_BOARD_LOOKBACK_MS;
+  const fromNow = nowMs - REMINDER_BOARD_RECENT_MS;
+  if (!Number.isFinite(fromStart)) {
+    return fromNow;
+  }
+  if (!Number.isFinite(fromNow)) {
+    return fromStart;
+  }
+  return Math.min(fromStart, fromNow);
 }
 
 /**

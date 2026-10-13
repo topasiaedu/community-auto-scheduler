@@ -253,3 +253,8 @@ Append-only timeline of ingests, filed queries, and lint passes. Newest entries 
 - Question: Schedule a reminder that does not post to any WhatsApp group, and still updates the Telegram status at that time.
 - Answer filed: [[wiki/analysis/telegram-reminder-status-board]]
 - Notes: Worker treats `status-only@nmcas` as Sent with no WhatsApp send. Script `apps/api/src/scripts/schedule-status-only.ts`. Run it on the droplet only after this build is deployed.
+
+## [2026-10-13] query | Status-only reminder did not reach Telegram
+- Question: The status-only reminder was due at 3:23 pm MYT and the Telegram group stayed quiet.
+- Answer filed: [[wiki/analysis/telegram-reminder-status-board]]
+- Notes: The row is Sent and the pg-boss job completed. WhatsApp was not used. The sweep's candidate query returned already-closed batches, so this batch never got a notice. Fix selects the newest unfinished batches and keeps a 6-hour recent window after restart.

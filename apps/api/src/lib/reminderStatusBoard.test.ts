@@ -7,6 +7,7 @@ import {
   collectReminderBoard,
   deliverReminderBoard,
   formatReminderStatusBoard,
+  reminderAnnounceNotBeforeMs,
   reminderBatchIsCurrent,
   type ReminderBatchSourceRow,
   type ReminderBoardSlotInput,
@@ -211,6 +212,24 @@ describe("reminderBatchIsCurrent", () => {
     const notBefore = startedAt - 30 * 60 * 1000;
     const liveSlot = mytInstant("2026-10-12", "19:10");
     assert.equal(reminderBatchIsCurrent([liveSlot], notBefore), true);
+  });
+});
+
+describe("reminderAnnounceNotBeforeMs", () => {
+  it("keeps a reminder the sweep missed earlier the same day", () => {
+    const startedAt = mytInstant("2026-10-13", "16:30").getTime();
+    const nowMs = mytInstant("2026-10-13", "16:35").getTime();
+    const notBefore = reminderAnnounceNotBeforeMs(startedAt, nowMs);
+    const missed = mytInstant("2026-10-13", "15:23");
+    assert.equal(reminderBatchIsCurrent([missed], notBefore), true);
+  });
+
+  it("still skips a reminder from a previous day after restart", () => {
+    const startedAt = mytInstant("2026-10-13", "16:30").getTime();
+    const nowMs = mytInstant("2026-10-13", "16:35").getTime();
+    const notBefore = reminderAnnounceNotBeforeMs(startedAt, nowMs);
+    const oldSlot = mytInstant("2026-10-05", "20:00");
+    assert.equal(reminderBatchIsCurrent([oldSlot], notBefore), false);
   });
 });
 

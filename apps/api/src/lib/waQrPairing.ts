@@ -6,14 +6,15 @@
  * and `getQRChannel()` never emits `qr` — the UI stays on "Generating QR…" forever.
  */
 
-/** How many failed logged-in reconnect waits before forcing a wipe + QR re-pair. */
-export const WA_RECONNECT_FAILURES_BEFORE_QR_REPAIR = 3;
-
 export type WaPairingAfterInitPlan = "connect_stored_session" | "open_qr_on_current_client";
 
 export type WaPairingAfterDeadSessionPlan = "recreate_client_then_open_qr";
 
-export type WaPairingAfterLoggedInWaitPlan = "schedule_reconnect" | "recreate_client_then_open_qr";
+/**
+ * A paired device that misses its reconnect wait stays paired.
+ * A new QR would call logout and make the phone show "connection failed".
+ */
+export type WaPairingAfterLoggedInWaitPlan = "schedule_reconnect";
 
 /**
  * After `client.init()`, choose stored-session connect vs first-time QR on this client.
@@ -34,18 +35,15 @@ export function planPairingAfterDeadStoredSession(): WaPairingAfterDeadSessionPl
 }
 
 /**
- * After `isLoggedIn()` was true but `waitForConnection` failed.
- * Retry a few times; then force wipe + fresh QR so the UI is not stuck on "Connecting…".
+ * After a saved login misses `waitForConnection`.
+ * Always retry that same login. Failure count is accepted so callers can log it;
+ * it must not switch the plan to a new QR.
  */
 export function planPairingAfterLoggedInWaitFailed(
   consecutiveFailures: number,
 ): WaPairingAfterLoggedInWaitPlan {
-  const failures =
-    typeof consecutiveFailures === "number" && Number.isFinite(consecutiveFailures)
-      ? Math.max(0, Math.floor(consecutiveFailures))
-      : 0;
-  if (failures >= WA_RECONNECT_FAILURES_BEFORE_QR_REPAIR) {
-    return "recreate_client_then_open_qr";
+  if (typeof consecutiveFailures !== "number" || !Number.isFinite(consecutiveFailures)) {
+    return "schedule_reconnect";
   }
   return "schedule_reconnect";
 }

@@ -5,7 +5,6 @@ import {
   planPairingAfterInit,
   planPairingAfterLoggedInWaitFailed,
   simulateDeadSessionQrPairing,
-  WA_RECONNECT_FAILURES_BEFORE_QR_REPAIR,
 } from "./waQrPairing.js";
 
 describe("waQrPairing", () => {
@@ -37,12 +36,10 @@ describe("waQrPairing", () => {
     assert.equal(result.createdClientCount, 2);
   });
 
-  it("schedules reconnect then forces QR re-pair after repeated wait failures", () => {
+  it("keeps the saved login after repeated reconnect waits", () => {
     assert.equal(planPairingAfterLoggedInWaitFailed(1), "schedule_reconnect");
     assert.equal(planPairingAfterLoggedInWaitFailed(2), "schedule_reconnect");
-    assert.equal(
-      planPairingAfterLoggedInWaitFailed(WA_RECONNECT_FAILURES_BEFORE_QR_REPAIR),
-      "recreate_client_then_open_qr",
-    );
+    assert.equal(planPairingAfterLoggedInWaitFailed(3), "schedule_reconnect");
+    assert.equal(planPairingAfterLoggedInWaitFailed(Number.NaN), "schedule_reconnect");
   });
 });

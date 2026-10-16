@@ -31,7 +31,6 @@ import {
 import { parseActiveCommunityJids } from "../lib/valueFanOut.js";
 import { sendGroupImage, sendGroupPoll, sendGroupSticker, sendGroupText, withTempImageFile } from "./wa-send.js";
 import {
-  planPairingAfterDeadStoredSession,
   planPairingAfterInit,
   planPairingAfterLoggedInWaitFailed,
 } from "../lib/waQrPairing.js";
@@ -286,6 +285,13 @@ export class WaManager {
   /** Operator-facing copy when WhatsApp rejects the whatsmeow client version. */
   private static readonly CLIENT_OUTDATED_ERROR =
     "WhatsApp rejected this app version (client outdated). Update @whatsmeow-node/whatsmeow-node on the server, then Clear session.";
+
+  /**
+   * Shown while a paired device is offline.
+   * The saved login is kept; Clear session is the only local unlink.
+   */
+  private static readonly RECONNECT_KEEP_SESSION_ERROR =
+    "WhatsApp disconnected — reconnecting with the saved login. Do not scan a new QR unless you cleared the session.";
 
   /** Was 60s; 8MB session re-read every minute caused avoidable heap spikes on 512MB. */
   private static readonly PERSIST_INTERVAL_MS = 5 * 60_000;
@@ -865,15 +871,9 @@ export class WaManager {
     if (existing !== undefined) {
       try {
         if (await existing.isConnected()) {
-          const loggedIn = await this.safeIsLoggedIn(existing);
-          if (loggedIn) {
-            this.uiState = "connected";
-            this.qrPairingActive = false;
-            this.latestQr = undefined;
-            this.loggedInWaitFailures = 0;
-            this.bootPhase = undefined;
-            this.cancelQrRepairTimer();
-            this.ensureGroupsRefreshLoop();
+          const loginState = await this.probeLoggedIn(existing);
+          if (loginState === "logged_in") {
+            this.markConnectedFromExistingSession();
             return;
           }
           if (
@@ -884,52 +884,50 @@ export class WaManager {
             this.uiState = "connecting";
             return;
           }
+          if (loginState === "unknown") {
+            // A failed login check is not proof the phone was unlinked.
+            this.keepSavedLoginAndReconnect("login_check_failed");
+            return;
+          }
           console.warn(
-            `[WaManager] socket connected but not logged in projectId=${this.projectId}; repairing`,
+            `[WaManager] socket connected but store has no device id projectId=${this.projectId}; restoring saved login`,
           );
           await this.disposeClientQuietly(existing);
           this.client = undefined;
           this.latestQr = undefined;
           this.qrPairingActive = false;
-          await wipeWhatsAppStore(this.prisma, this.env, this.projectId);
           await this.boot();
           return;
         }
-        if (await existing.isLoggedIn()) {
+        const loginState = await this.probeLoggedIn(existing);
+        if (loginState === "logged_in" || loginState === "unknown") {
           this.uiState = "connecting";
           this.bootPhase = "reconnect_existing";
           await existing.connect();
           const ok = await existing.waitForConnection(20_000);
-          if (ok) {
-            this.uiState = "connected";
-            this.loggedInWaitFailures = 0;
-            this.bootPhase = undefined;
+          const afterConnect = ok ? await this.probeLoggedIn(existing) : "unknown";
+          if (afterConnect === "logged_in") {
+            this.markConnectedFromExistingSession();
             this.startPersistTimer();
-            this.ensureGroupsRefreshLoop();
             await this.safePersist();
             return;
           }
-          this.loggedInWaitFailures += 1;
-          const plan = planPairingAfterLoggedInWaitFailed(this.loggedInWaitFailures);
+          const plan = planPairingAfterLoggedInWaitFailed(this.loggedInWaitFailures + 1);
           console.warn(
-            `[WaManager] logged-in wait failed projectId=${this.projectId} failures=${String(this.loggedInWaitFailures)} plan=${plan}`,
+            `[WaManager] logged-in wait failed projectId=${this.projectId} plan=${plan}`,
           );
-          if (plan === "schedule_reconnect") {
-            this.uiState = "connecting";
-            this.scheduleReconnect("wait_for_connection_failed");
-            return;
-          }
-          // Fall through: dispose + wipe + fresh QR pairing via boot().
-          await this.disposeClientQuietly(existing);
-          this.client = undefined;
-          this.latestQr = undefined;
-          this.loggedInWaitFailures = 0;
-          await wipeWhatsAppStore(this.prisma, this.env, this.projectId);
-          await this.boot();
+          this.keepSavedLoginAndReconnect("wait_for_connection_failed");
           return;
         }
-      } catch {
-        /* tear down and full boot */
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.warn(
+          `[WaManager] ensureRunning failed projectId=${this.projectId}: ${message}`,
+        );
+        await this.disposeClientQuietly(existing);
+        this.client = undefined;
+        this.keepSavedLoginAndReconnect("ensure_running_threw");
+        return;
       }
       await this.disposeClientQuietly(existing);
       this.client = undefined;
@@ -938,18 +936,43 @@ export class WaManager {
   }
 
   /**
-   * Best-effort disconnect + close so a wiped store is never paired with a live Go process.
+   * Marks an already-paired client as connected without opening a QR.
+   */
+  private markConnectedFromExistingSession(): void {
+    this.uiState = "connected";
+    this.qrPairingActive = false;
+    this.latestQr = undefined;
+    this.loggedInWaitFailures = 0;
+    this.bootPhase = undefined;
+    this.lastError = undefined;
+    this.cancelQrRepairTimer();
+    this.ensureGroupsRefreshLoop();
+  }
+
+  /**
+   * Retries the paired device and leaves the Postgres session in place.
+   * logout() is intentionally not called: that is what makes the phone say connection failed.
+   */
+  private keepSavedLoginAndReconnect(reason: string): void {
+    this.loggedInWaitFailures += 1;
+    this.uiState = "connecting";
+    this.lastError = WaManager.RECONNECT_KEEP_SESSION_ERROR;
+    const plan = planPairingAfterLoggedInWaitFailed(this.loggedInWaitFailures);
+    console.warn(
+      `[WaManager] keeping saved login projectId=${this.projectId} failures=${String(this.loggedInWaitFailures)} plan=${plan} reason=${reason}`,
+    );
+    this.scheduleReconnect(reason);
+  }
+
+  /**
+   * Closes the Go process without unlinking the phone.
+   * logout() belongs only on Clear session and an operator pair-code reset.
    */
   private async disposeClientQuietly(client: WhatsmeowClient): Promise<void> {
     try {
       await client.disconnect();
     } catch {
       /* ignore */
-    }
-    try {
-      await client.logout();
-    } catch {
-      /* may already be logged out / never paired */
     }
     try {
       client.close();
@@ -1466,8 +1489,12 @@ export class WaManager {
       this.waOpChain = this.waOpChain
         .then(async () => {
           const client = this.client;
-          if (client !== undefined && (await this.safeIsLoggedIn(client))) {
-            return;
+          if (client !== undefined) {
+            const loginState = await this.probeLoggedIn(client);
+            // unknown means the check failed. Do not wipe a login we could not read.
+            if (loginState !== "not_logged_in") {
+              return;
+            }
           }
           this.qrRepairAttempts += 1;
           console.warn(
@@ -1584,30 +1611,21 @@ export class WaManager {
       this.bootPhase = "reconnect_stored";
       await client.connect();
       const connectedOk = await client.waitForConnection(20_000);
-      const loggedIn = connectedOk ? await this.safeIsLoggedIn(client) : false;
+      const loginState = connectedOk ? await this.probeLoggedIn(client) : "unknown";
       console.info(
-        `[WaManager] boot projectId=${this.projectId} storedSession=true connected=${String(connectedOk)} loggedIn=${String(loggedIn)}`,
+        `[WaManager] boot projectId=${this.projectId} storedSession=true connected=${String(connectedOk)} loginState=${loginState}`,
       );
-      if (loggedIn) {
-        this.uiState = "connected";
-        this.loggedInWaitFailures = 0;
+      if (loginState === "logged_in") {
+        this.markConnectedFromExistingSession();
         this.qrRepairAttempts = 0;
-        this.bootPhase = undefined;
         this.startPersistTimer();
-        this.ensureGroupsRefreshLoop();
         await this.safePersist();
         return;
       }
 
-      const deadPlan = planPairingAfterDeadStoredSession();
-      console.warn(
-        `[WaManager] stored session unusable projectId=${this.projectId}; plan=${deadPlan}`,
-      );
-      this.bootPhase = "wipe_dead_session";
-      await this.disposeClientQuietly(client);
-      this.client = undefined;
-      await wipeWhatsAppStore(this.prisma, this.env, this.projectId);
-      await this.openFreshQrPairing();
+      // One missed wait used to logout() and delete the blob, so the phone
+      // showed connection failed and the next page load asked for a new QR.
+      this.keepSavedLoginAndReconnect("stored_session_connect_failed");
       return;
     }
 
@@ -1719,6 +1737,12 @@ export class WaManager {
 
     const existing = this.client;
     if (existing !== undefined) {
+      // Operator asked for a new code, so this unlink is intentional.
+      try {
+        await existing.logout();
+      } catch {
+        /* never paired, or WhatsApp already removed the device */
+      }
       await this.disposeClientQuietly(existing);
       this.client = undefined;
     }
@@ -1829,15 +1853,27 @@ export class WaManager {
     await this.safePersist();
   }
 
-  /** `isLoggedIn` that never throws (defaults to false) so boot can fall back to QR linking. */
-  private async safeIsLoggedIn(client: WhatsmeowClient): Promise<boolean> {
+  /**
+   * Reads whether the open store still has a paired device id.
+   * `unknown` means the check failed. Callers must not treat that as logged out.
+   */
+  private async probeLoggedIn(client: WhatsmeowClient): Promise<WaLoginProbe> {
     try {
-      return await client.isLoggedIn();
-    } catch {
-      return false;
+      const loggedIn = await client.isLoggedIn();
+      if (typeof loggedIn !== "boolean") {
+        return "unknown";
+      }
+      return loggedIn ? "logged_in" : "not_logged_in";
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(`[WaManager] isLoggedIn failed projectId=${this.projectId}: ${message}`);
+      return "unknown";
     }
   }
 }
+
+/** Result of asking whatsmeow whether this process still has a paired device id. */
+type WaLoginProbe = "logged_in" | "not_logged_in" | "unknown";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {

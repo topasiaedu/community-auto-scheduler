@@ -13,11 +13,18 @@ import type { PrismaClient } from "@nmcas/db";
 import type { ApiEnv } from "../env.js";
 import {
   buildEngagementChatAllowlist,
+  hasEncryptedComment,
   hasEncryptedReaction,
   isEngagementChatAllowed,
+  parseCommentTargetId,
+  parseDecryptedCommentEvent,
   parseDecryptedReactionPayload,
+  parsePlainCommentEvent,
   parsePlainReactionMessage,
   parseQuotedReplyEvent,
+  parseReplyRevokeId,
+  selectTrackedMessage,
+  trimNonEmpty,
   waTimestampToDate,
   type ParsedReactionEvent,
   type ParsedReplyEvent,
@@ -174,6 +181,30 @@ function buildWaGroupOption(
 
   const label = name.length > 0 ? name : "(unnamed group)";
   return { jid: g.jid, name, label, isAnnounce: false };
+}
+
+/**
+ * Message info passed to whatsmeow-node decrypt helpers.
+ * The shape matches `decryptReaction` / `decryptComment` (plain records, no secrets).
+ */
+function engagementInfoRecord(info: {
+  id: string;
+  chat: string;
+  sender: string;
+  isFromMe: boolean;
+  isGroup: boolean;
+  timestamp: number;
+  pushName: string;
+}): Record<string, unknown> {
+  return {
+    id: info.id,
+    chat: info.chat,
+    sender: info.sender,
+    isFromMe: info.isFromMe,
+    isGroup: info.isGroup,
+    timestamp: info.timestamp,
+    pushName: info.pushName,
+  };
 }
 
 export class WaManager {
@@ -1258,8 +1289,8 @@ export class WaManager {
   }
 
   /**
-   * Ingests reactions / quoted replies for allowlisted community chats only.
-   * Matches on `ScheduledMessage.waMessageId` (announcement quotes only for replies).
+   * Ingests reactions, announcement comments, quoted replies, and reply revokes
+   * for allowlisted community chats only. Matches on `ScheduledMessage.waMessageId`.
    */
   private async handleInboundEngagement(event: {
     info: {
@@ -1288,16 +1319,10 @@ export class WaManager {
       const client = this.client;
       if (client !== undefined) {
         try {
-          const infoRecord: Record<string, unknown> = {
-            id: event.info.id,
-            chat: event.info.chat,
-            sender: event.info.sender,
-            isFromMe: event.info.isFromMe,
-            isGroup: event.info.isGroup,
-            timestamp: event.info.timestamp,
-            pushName: event.info.pushName,
-          };
-          const decrypted = await client.decryptReaction(infoRecord, event.message);
+          const decrypted = await client.decryptReaction(
+            engagementInfoRecord(event.info),
+            event.message,
+          );
           reaction = parseDecryptedReactionPayload(decrypted, reactionWaId);
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : String(err);
@@ -1313,10 +1338,73 @@ export class WaManager {
       return;
     }
 
+    if (hasEncryptedComment(event.message)) {
+      const targetId = parseCommentTargetId(event.message);
+      const client = this.client;
+      if (targetId !== null && client !== undefined) {
+        try {
+          const decrypted = await client.decryptComment(
+            engagementInfoRecord(event.info),
+            event.message,
+          );
+          const reply = parseDecryptedCommentEvent(decrypted, targetId, event.info.id);
+          if (reply !== null) {
+            await this.upsertEngagementReply(event, reply);
+          }
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.warn(
+            `[WaManager] decryptComment failed projectId=${this.projectId} target=${targetId}: ${msg}`,
+          );
+        }
+      }
+      return;
+    }
+
+    const plainComment = parsePlainCommentEvent(event.message, event.info.id);
+    if (plainComment !== null) {
+      await this.upsertEngagementReply(event, plainComment);
+      return;
+    }
+
     const reply = parseQuotedReplyEvent(event.message, event.info.id);
     if (reply !== null) {
       await this.upsertEngagementReply(event, reply);
+      return;
     }
+
+    const revokedReplyId = parseReplyRevokeId(event.message);
+    if (revokedReplyId !== null) {
+      await this.deleteRevokedReply(revokedReplyId);
+    }
+  }
+
+  /**
+   * Loads the Queue row for a parent stanza id.
+   * A single row is used even when the event chat JID differs. Several rows require a chat match.
+   */
+  private async findTrackedScheduledMessageId(
+    waMessageId: string,
+    chatJid: string,
+  ): Promise<string | null> {
+    const rows = await this.prisma.scheduledMessage.findMany({
+      where: {
+        projectId: this.projectId,
+        waMessageId,
+      },
+      select: { id: true, groupJid: true },
+      take: 10,
+    });
+    const match = selectTrackedMessage(rows, chatJid);
+    if (match === null) {
+      return null;
+    }
+    if (match.chatDiffers) {
+      console.info(
+        `[WaManager] engagement chat differs projectId=${this.projectId} waMessageId=${waMessageId} chat=${chatJid}`,
+      );
+    }
+    return match.id;
   }
 
   /**
@@ -1325,32 +1413,30 @@ export class WaManager {
    */
   private async upsertEngagementReaction(
     event: {
-      info: { chat: string; sender: string; timestamp: number };
+      info: { chat: string; sender: string; timestamp: number; pushName: string };
     },
     reaction: ParsedReactionEvent,
   ): Promise<void> {
-    const row = await this.prisma.scheduledMessage.findFirst({
-      where: {
-        projectId: this.projectId,
-        waMessageId: reaction.targetWaMessageId,
-        groupJid: event.info.chat,
-      },
-      select: { id: true },
-    });
-    if (row === null) {
+    const scheduledMessageId = await this.findTrackedScheduledMessageId(
+      reaction.targetWaMessageId,
+      event.info.chat,
+    );
+    if (scheduledMessageId === null) {
       return;
     }
     const reactedAt = waTimestampToDate(event.info.timestamp);
+    const reactorName = trimNonEmpty(event.info.pushName);
     await this.prisma.messageReaction.upsert({
       where: {
         scheduledMessageId_reactorJid: {
-          scheduledMessageId: row.id,
+          scheduledMessageId,
           reactorJid: event.info.sender,
         },
       },
       create: {
-        scheduledMessageId: row.id,
+        scheduledMessageId,
         reactorJid: event.info.sender,
+        reactorName,
         emoji: reaction.emoji,
         waReactionId: reaction.waReactionId,
         reactedAt,
@@ -1359,43 +1445,42 @@ export class WaManager {
         emoji: reaction.emoji,
         waReactionId: reaction.waReactionId,
         reactedAt,
+        ...(reactorName !== null ? { reactorName } : {}),
       },
     });
   }
 
   /**
-   * Upserts a quoted reply keyed by (scheduledMessageId, replyWaMessageId).
-   * Only announcement-quote matches (caller already parsed stanzaId).
+   * Upserts a reply keyed by (scheduledMessageId, replyWaMessageId).
+   * The parent id is the announcement comment target or a quoted stanza id.
    */
   private async upsertEngagementReply(
     event: {
-      info: { chat: string; sender: string; timestamp: number };
+      info: { chat: string; sender: string; timestamp: number; pushName: string };
     },
     reply: ParsedReplyEvent,
   ): Promise<void> {
-    const row = await this.prisma.scheduledMessage.findFirst({
-      where: {
-        projectId: this.projectId,
-        waMessageId: reply.quotedWaMessageId,
-        groupJid: event.info.chat,
-      },
-      select: { id: true },
-    });
-    if (row === null) {
+    const scheduledMessageId = await this.findTrackedScheduledMessageId(
+      reply.quotedWaMessageId,
+      event.info.chat,
+    );
+    if (scheduledMessageId === null) {
       return;
     }
     const repliedAt = waTimestampToDate(event.info.timestamp);
+    const replierName = trimNonEmpty(event.info.pushName);
     await this.prisma.messageReply.upsert({
       where: {
         scheduledMessageId_replyWaMessageId: {
-          scheduledMessageId: row.id,
+          scheduledMessageId,
           replyWaMessageId: reply.replyWaMessageId,
         },
       },
       create: {
-        scheduledMessageId: row.id,
+        scheduledMessageId,
         replyWaMessageId: reply.replyWaMessageId,
         replierJid: event.info.sender,
+        replierName,
         bodyPreview: reply.bodyPreview,
         repliedAt,
       },
@@ -1403,8 +1488,27 @@ export class WaManager {
         replierJid: event.info.sender,
         bodyPreview: reply.bodyPreview,
         repliedAt,
+        ...(replierName !== null ? { replierName } : {}),
       },
     });
+  }
+
+  /**
+   * Removes a stored reply when WhatsApp revokes that comment stanza.
+   * Reactions are not deleted here; an empty emoji is the removal signal.
+   */
+  private async deleteRevokedReply(replyWaMessageId: string): Promise<void> {
+    const result = await this.prisma.messageReply.deleteMany({
+      where: {
+        replyWaMessageId,
+        scheduledMessage: { projectId: this.projectId },
+      },
+    });
+    if (result.count > 0) {
+      console.info(
+        `[WaManager] revoked reply removed projectId=${this.projectId} replyWaMessageId=${replyWaMessageId} count=${String(result.count)}`,
+      );
+    }
   }
 
   /**

@@ -72,11 +72,29 @@ export type ScheduledMessage = {
   waAckedAt?: string | null;
 };
 
-/** Counts from `GET /messages/:id/engagement` (Agent 4 foundation). */
+/** Counts from `GET /messages/:id/engagement`. */
+export type MessageEngagementReaction = {
+  emoji: string;
+  count: number;
+};
+
+/** One stored reply shown on an expanded Queue row. */
+export type MessageEngagementReply = {
+  id: string;
+  replyWaMessageId: string;
+  replierJid: string;
+  replierName: string | null;
+  bodyPreview: string | null;
+  repliedAt: string;
+};
+
+/** Counts from `GET /messages/:id/engagement` (reactions are people, not taps). */
 export type MessageEngagementCounts = {
   messageId: string;
   reactionCount: number;
   replyCount: number;
+  reactionBreakdown: MessageEngagementReaction[];
+  recentReplies?: MessageEngagementReply[];
 };
 
 export type OperatorKind = "VALUE" | "REMINDER";

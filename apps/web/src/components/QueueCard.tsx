@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
 import { utcIsoToDatetimeLocalMyt } from "../myt.js";
 import { MessagePreview } from "./MessagePreview.js";
 import { QueueMessagePreview } from "./QueueMessagePreview.js";
-import { QueueEngagementBadge } from "./QueueEngagementBadge.js";
+import { QueueEngagementBadge, QueueEngagementReplies } from "./QueueEngagementBadge.js";
 import { kindBadgeLabel, subBadgeLabel } from "../lib/queueLabels.js";
 import {
   formatAttributedBy,
@@ -225,6 +225,11 @@ export function QueueCard({ message: m, vm }: QueueCardProps): ReactElement {
             {m.error !== null ? (
               <p className="mt-2 text-xs text-destructive">{m.error}</p>
             ) : null}
+            <QueueEngagementReplies
+              messageId={m.id}
+              status={m.status}
+              authorizedFetch={authorizedFetch}
+            />
           </div>
         ) : null}
 

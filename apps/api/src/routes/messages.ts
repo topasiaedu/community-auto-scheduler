@@ -26,6 +26,7 @@ import {
   validateReminderTemplateAssets,
 } from "../lib/reminderMessage.js";
 import {
+  buildReactionBreakdown,
   ENGAGEMENT_RECENT_LIST_DEFAULT,
 } from "../lib/waEngagement.js";
 
@@ -693,25 +694,32 @@ export function registerMessageRoutes(
       return reply.code(404).send({ error: "Message not found" });
     }
 
-    const [reactionCount, replyCount] = await Promise.all([
-      prisma.messageReaction.count({
-        where: {
-          scheduledMessageId: row.id,
-          emoji: { not: "" },
-        },
+    const [groupedReactions, replyCount] = await Promise.all([
+      prisma.messageReaction.groupBy({
+        by: ["emoji"],
+        where: { scheduledMessageId: row.id },
+        _count: { _all: true },
       }),
       prisma.messageReply.count({
         where: { scheduledMessageId: row.id },
       }),
     ]);
+    const { reactionCount, reactionBreakdown } = buildReactionBreakdown(
+      groupedReactions.map((group) => ({
+        emoji: group.emoji,
+        count: group._count._all,
+      })),
+    );
 
     const payload: {
       messageId: string;
       reactionCount: number;
       replyCount: number;
+      reactionBreakdown: Array<{ emoji: string; count: number }>;
       recentReactions?: Array<{
         id: string;
         reactorJid: string;
+        reactorName: string | null;
         emoji: string;
         reactedAt: string;
       }>;
@@ -719,6 +727,7 @@ export function registerMessageRoutes(
         id: string;
         replyWaMessageId: string;
         replierJid: string;
+        replierName: string | null;
         bodyPreview: string | null;
         repliedAt: string;
       }>;
@@ -726,6 +735,7 @@ export function registerMessageRoutes(
       messageId: row.id,
       reactionCount,
       replyCount,
+      reactionBreakdown,
     };
 
     if (includeRecent) {
@@ -738,6 +748,7 @@ export function registerMessageRoutes(
           select: {
             id: true,
             reactorJid: true,
+            reactorName: true,
             emoji: true,
             reactedAt: true,
           },
@@ -750,6 +761,7 @@ export function registerMessageRoutes(
             id: true,
             replyWaMessageId: true,
             replierJid: true,
+            replierName: true,
             bodyPreview: true,
             repliedAt: true,
           },
@@ -757,18 +769,20 @@ export function registerMessageRoutes(
           take: ENGAGEMENT_RECENT_LIST_DEFAULT,
         }),
       ]);
-      payload.recentReactions = reactions.map((r) => ({
-        id: r.id,
-        reactorJid: r.reactorJid,
-        emoji: r.emoji,
-        reactedAt: r.reactedAt.toISOString(),
+      payload.recentReactions = reactions.map((reaction) => ({
+        id: reaction.id,
+        reactorJid: reaction.reactorJid,
+        reactorName: reaction.reactorName,
+        emoji: reaction.emoji,
+        reactedAt: reaction.reactedAt.toISOString(),
       }));
-      payload.recentReplies = replies.map((r) => ({
-        id: r.id,
-        replyWaMessageId: r.replyWaMessageId,
-        replierJid: r.replierJid,
-        bodyPreview: r.bodyPreview,
-        repliedAt: r.repliedAt.toISOString(),
+      payload.recentReplies = replies.map((replyRow) => ({
+        id: replyRow.id,
+        replyWaMessageId: replyRow.replyWaMessageId,
+        replierJid: replyRow.replierJid,
+        replierName: replyRow.replierName,
+        bodyPreview: replyRow.bodyPreview,
+        repliedAt: replyRow.repliedAt.toISOString(),
       }));
     }
 

@@ -19,6 +19,7 @@ import {
   parseCommentTargetId,
   parseDecryptedCommentEvent,
   parseDecryptedReactionPayload,
+  parseEncryptedReactionTargetId,
   parsePlainCommentEvent,
   parsePlainReactionMessage,
   parseQuotedReplyEvent,
@@ -1376,25 +1377,28 @@ export class WaManager {
 
     if (reaction === null && hasEncryptedReaction(event.message)) {
       const client = this.client;
+      const wrapperTargetId = parseEncryptedReactionTargetId(event.message);
       if (client === undefined) {
         this.logEngagement("warn", `reaction skipped no-client ${eventRef}`);
+      } else if (wrapperTargetId === null) {
+        this.logEngagement("warn", `reaction skipped no-target ${eventRef}`);
       } else {
         try {
           const decrypted = await client.decryptReaction(
             engagementInfoRecord(event.info),
             event.message,
           );
-          reaction = parseDecryptedReactionPayload(decrypted, reactionWaId);
+          reaction = parseDecryptedReactionPayload(decrypted, reactionWaId, wrapperTargetId);
           if (reaction === null) {
             this.logEngagement(
               "warn",
-              `reaction decrypt unparsed ${eventRef} keys=${payloadKeyList(decrypted)}`,
+              `reaction decrypt unparsed ${eventRef} target=${wrapperTargetId} keys=${payloadKeyList(decrypted)}`,
             );
           }
         } catch (err: unknown) {
           this.logEngagement(
             "warn",
-            `reaction decrypt failed ${eventRef} error=${engagementErrorText(err)}`,
+            `reaction decrypt failed ${eventRef} target=${wrapperTargetId} error=${engagementErrorText(err)}`,
           );
         }
       }

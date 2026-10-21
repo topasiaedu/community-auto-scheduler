@@ -362,11 +362,13 @@ export function parsePlainReactionMessage(
 
 /**
  * Parses a decrypted reaction payload (from `decryptReaction`) into a normalized event.
- * Accepts both `{ reactionMessage: … }` wrappers and flat `{ key, text }` shapes.
+ * Accepts `{ reactionMessage: … }`, flat `{ key, text }`, and a body that only has `text`.
+ * Announcement reactions strip `key` before encryption. Pass the wrapper target id for those.
  */
 export function parseDecryptedReactionPayload(
   decrypted: Record<string, unknown>,
   reactionWaMessageId: string | null,
+  wrapperTargetWaMessageId: string | null = null,
 ): ParsedReactionEvent | null {
   const fromWrapper = parsePlainReactionMessage(decrypted, reactionWaMessageId);
   if (fromWrapper !== null) {
@@ -375,7 +377,8 @@ export function parseDecryptedReactionPayload(
   const targetId =
     readMessageKeyId(decrypted.key) ??
     trimNonEmpty(decrypted.messageID) ??
-    trimNonEmpty(decrypted.messageId);
+    trimNonEmpty(decrypted.messageId) ??
+    trimNonEmpty(wrapperTargetWaMessageId);
   if (targetId === null) {
     return null;
   }
@@ -385,6 +388,20 @@ export function parseDecryptedReactionPayload(
     emoji,
     waReactionId: reactionWaMessageId,
   };
+}
+
+/**
+ * Announcement stanza id carried on `encReactionMessage.targetMessageKey`.
+ * Decrypt leaves this off the inner reaction, which only has `text` and `senderTimestampMS`.
+ */
+export function parseEncryptedReactionTargetId(
+  message: Record<string, unknown>,
+): string | null {
+  const encrypted = message.encReactionMessage;
+  if (!isPlainObject(encrypted)) {
+    return null;
+  }
+  return readMessageKeyId(encrypted.targetMessageKey);
 }
 
 /**

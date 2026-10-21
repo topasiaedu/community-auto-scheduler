@@ -12,6 +12,7 @@ import {
   parseCommentTargetId,
   parseDecryptedCommentEvent,
   parseDecryptedReactionPayload,
+  parseEncryptedReactionTargetId,
   parsePlainCommentEvent,
   parsePlainReactionMessage,
   parseQuotedReplyEvent,
@@ -175,6 +176,23 @@ describe("waEngagement helpers", () => {
       targetWaMessageId: "target-99",
       emoji: "🔥",
       waReactionId: "enc-rxn-1",
+    });
+  });
+
+  it("parseDecryptedReactionPayload uses the wrapper target when the body has no key", () => {
+    const message = {
+      encReactionMessage: { targetMessageKey: { ID: "announcement-7" } },
+    };
+    assert.equal(parseEncryptedReactionTargetId(message), "announcement-7");
+    const parsed = parseDecryptedReactionPayload(
+      { senderTimestampMS: "1761000000000", text: "👍" },
+      "3EB0178947CFDCF9E1A6D3",
+      parseEncryptedReactionTargetId(message),
+    );
+    assert.deepEqual(parsed, {
+      targetWaMessageId: "announcement-7",
+      emoji: "👍",
+      waReactionId: "3EB0178947CFDCF9E1A6D3",
     });
   });
 

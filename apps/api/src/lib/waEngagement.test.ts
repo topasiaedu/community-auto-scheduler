@@ -2,14 +2,21 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   buildEngagementChatAllowlist,
+  buildReactionBreakdown,
   countActiveReactions,
   extractQuotedWaMessageId,
+  hasEncryptedComment,
   hasEncryptedReaction,
   isEngagementChatAllowed,
   isReactionRemoval,
+  parseCommentTargetId,
+  parseDecryptedCommentEvent,
   parseDecryptedReactionPayload,
+  parsePlainCommentEvent,
   parsePlainReactionMessage,
   parseQuotedReplyEvent,
+  parseReplyRevokeId,
+  selectTrackedMessage,
   truncateBodyPreview,
   waTimestampToDate,
 } from "./waEngagement.js";
@@ -33,7 +40,24 @@ describe("waEngagement helpers", () => {
     assert.equal(isEngagementChatAllowed("  ", allow), false);
   });
 
-  it("parsePlainReactionMessage extracts target id and emoji", () => {
+  it("parsePlainReactionMessage reads the live key.ID spelling", () => {
+    const parsed = parsePlainReactionMessage(
+      {
+        reactionMessage: {
+          key: { ID: "wa-out-1", remoteJID: "g@g.us", fromMe: true },
+          text: "👍",
+        },
+      },
+      "reaction-stanza-9",
+    );
+    assert.deepEqual(parsed, {
+      targetWaMessageId: "wa-out-1",
+      emoji: "👍",
+      waReactionId: "reaction-stanza-9",
+    });
+  });
+
+  it("parsePlainReactionMessage still accepts the lowercase id alias", () => {
     const parsed = parsePlainReactionMessage(
       {
         reactionMessage: {
@@ -121,13 +145,159 @@ describe("waEngagement helpers", () => {
     });
   });
 
-  it("parseQuotedReplyEvent skips reaction payloads", () => {
+  it("parsePlainReactionMessage treats blank text as removal", () => {
+    const parsed = parsePlainReactionMessage(
+      {
+        reactionMessage: {
+          key: { ID: "wa-out-3" },
+          text: "   ",
+        },
+      },
+      null,
+    );
+    assert.notEqual(parsed, null);
+    if (parsed === null) {
+      return;
+    }
+    assert.equal(parsed.emoji, "");
+    assert.equal(isReactionRemoval(parsed.emoji), true);
+  });
+
+  it("parseDecryptedReactionPayload reads key.ID from decryptReaction", () => {
+    const parsed = parseDecryptedReactionPayload(
+      {
+        key: { ID: "target-99" },
+        text: "🔥",
+      },
+      "enc-rxn-1",
+    );
+    assert.deepEqual(parsed, {
+      targetWaMessageId: "target-99",
+      emoji: "🔥",
+      waReactionId: "enc-rxn-1",
+    });
+  });
+
+  it("hasEncryptedComment detects encCommentMessage", () => {
+    assert.equal(hasEncryptedComment({ encCommentMessage: { encPayload: "x" } }), true);
+    assert.equal(hasEncryptedComment({ commentMessage: { targetMessageKey: { ID: "a" } } }), false);
+  });
+
+  it("parseCommentTargetId reads targetMessageKey.ID", () => {
+    assert.equal(
+      parseCommentTargetId({
+        encCommentMessage: { targetMessageKey: { ID: "announcement-1" } },
+      }),
+      "announcement-1",
+    );
+    assert.equal(
+      parseCommentTargetId({
+        commentMessage: { targetMessageKey: { ID: "announcement-2" } },
+      }),
+      "announcement-2",
+    );
+  });
+
+  it("parsePlainCommentEvent uses the inner message body", () => {
+    const parsed = parsePlainCommentEvent(
+      {
+        commentMessage: {
+          targetMessageKey: { ID: "announcement-9" },
+          message: { conversation: "On my way" },
+        },
+      },
+      "comment-stanza-1",
+    );
+    assert.deepEqual(parsed, {
+      quotedWaMessageId: "announcement-9",
+      replyWaMessageId: "comment-stanza-1",
+      bodyPreview: "On my way",
+    });
+  });
+
+  it("parseDecryptedCommentEvent keeps the wrapper target id", () => {
+    const parsed = parseDecryptedCommentEvent(
+      { conversation: "See you there" },
+      "announcement-9",
+      "comment-stanza-2",
+    );
+    assert.deepEqual(parsed, {
+      quotedWaMessageId: "announcement-9",
+      replyWaMessageId: "comment-stanza-2",
+      bodyPreview: "See you there",
+    });
+  });
+
+  it("parseReplyRevokeId accepts only the string REVOKE", () => {
+    assert.equal(
+      parseReplyRevokeId({
+        protocolMessage: { type: "REVOKE", key: { ID: "comment-stanza-2" } },
+      }),
+      "comment-stanza-2",
+    );
+    assert.equal(
+      parseReplyRevokeId({
+        protocolMessage: { key: { ID: "comment-stanza-2" } },
+      }),
+      null,
+    );
+    assert.equal(
+      parseReplyRevokeId({
+        protocolMessage: { type: 0, key: { ID: "comment-stanza-2" } },
+      }),
+      null,
+    );
+  });
+
+  it("selectTrackedMessage uses the only row when the chat JID differs", () => {
+    const match = selectTrackedMessage(
+      [{ id: "row-1", groupJid: "announcement@g.us" }],
+      "other-address@g.us",
+    );
+    assert.deepEqual(match, { id: "row-1", chatDiffers: true });
+  });
+
+  it("selectTrackedMessage requires a chat match when several rows share the id", () => {
+    const rows = [
+      { id: "row-a", groupJid: "a@g.us" },
+      { id: "row-b", groupJid: "b@g.us" },
+    ];
+    assert.deepEqual(selectTrackedMessage(rows, "b@g.us"), { id: "row-b", chatDiffers: false });
+    assert.equal(selectTrackedMessage(rows, "c@g.us"), null);
+  });
+
+  it("buildReactionBreakdown drops removals and sorts by count then emoji", () => {
+    const built = buildReactionBreakdown([
+      { emoji: "❤️", count: 4 },
+      { emoji: "", count: 2 },
+      { emoji: "   ", count: 1 },
+      { emoji: "👍", count: 8 },
+      { emoji: "🔥", count: 4 },
+    ]);
+    assert.equal(built.reactionCount, 16);
+    assert.deepEqual(built.reactionBreakdown, [
+      { emoji: "👍", count: 8 },
+      { emoji: "❤️", count: 4 },
+      { emoji: "🔥", count: 4 },
+    ]);
+  });
+
+  it("parseQuotedReplyEvent skips announcement comment wrappers", () => {
     assert.equal(
       parseQuotedReplyEvent(
         {
-          reactionMessage: { key: { id: "x" }, text: "👍" },
+          reactionMessage: { key: { ID: "x" }, text: "👍" },
         },
         "r1",
+      ),
+      null,
+    );
+    assert.equal(
+      parseQuotedReplyEvent(
+        {
+          encCommentMessage: { targetMessageKey: { ID: "announcement-1" } },
+        },
+        "c1",
       ),
       null,
     );

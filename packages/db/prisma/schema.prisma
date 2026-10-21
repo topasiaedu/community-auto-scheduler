@@ -207,6 +207,8 @@ model MessageReaction {
   emoji              String
   /// Stanza id of the reaction message itself (when known).
   waReactionId       String?
+  /// Display name from the reaction event, when WhatsApp sent one.
+  reactorName        String?
   reactedAt          DateTime
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
@@ -215,8 +217,8 @@ model MessageReaction {
   @@index([scheduledMessageId])
 }
 
-/// A quoted reply that targets a tracked NMCAS announcement message (Agent 4).
-/// Scope: quotes on the announcement stanza only (not free-form discussion chatter).
+/// A reply that targets a tracked NMCAS message.
+/// Announcement comments (`targetMessageKey`) and normal-group quotes (`stanzaID`).
 model MessageReply {
   id                 String           @id @default(cuid())
   scheduledMessageId String
@@ -225,6 +227,8 @@ model MessageReply {
   replyWaMessageId   String
   /// WhatsApp JID of the member who replied.
   replierJid         String
+  /// Display name from the reply event, when WhatsApp sent one.
+  replierName        String?
   /// Truncated body preview for operators (not full analytics).
   bodyPreview        String?
   repliedAt          DateTime

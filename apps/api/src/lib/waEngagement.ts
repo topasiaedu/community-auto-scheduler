@@ -1,16 +1,18 @@
 /**
  * Pure helpers for the engagement tracker foundation (Agent 4).
  *
- * Ingests reactions and quoted replies that target NMCAS outbound stanza ids
- * (`ScheduledMessage.waMessageId`). Does **not** store general group chatter.
+ * Ingests reactions, announcement comments, and quoted replies that target NMCAS
+ * outbound stanza ids (`ScheduledMessage.waMessageId`). Does **not** store general
+ * group chatter.
  *
  * ## Known limitations
  * - No historical backfill — only events received while the session is connected.
  * - Events during disconnect / reconnect gaps are missed permanently.
- * - Reply scope is **quotes on the announcement message** only (stanzaId match);
- *   free-form discussion-group chatter is ignored unless it quotes our message.
- * - Encrypted reactions require a live client `decryptReaction` call; plaintext
- *   `reactionMessage` is preferred when present.
+ * - Announcement replies are `encCommentMessage` / `commentMessage` (parent id on
+ *   `targetMessageKey`). A normal group reply is a quote (`contextInfo.stanzaID`).
+ * - Encrypted reactions and comments need a live client decrypt call. The message
+ *   secret stored at send time must still be in the session.
+ * - Phone and LID JIDs for the same person are not merged.
  */
 
 /** Max characters stored for reply body previews. */
@@ -124,6 +126,124 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * One Queue row that might own an inbound reaction or reply.
+ */
+export type TrackedMessageCandidate = {
+  id: string;
+  groupJid: string;
+};
+
+/**
+ * Chosen Queue row for an inbound event.
+ */
+export type TrackedMessageMatch = {
+  id: string;
+  /** True when the event chat JID is not the row's stored `groupJid`. */
+  chatDiffers: boolean;
+};
+
+/**
+ * Emoji total for the Queue badge. Removals are already excluded.
+ */
+export type ReactionBreakdownEntry = {
+  emoji: string;
+  count: number;
+};
+
+/**
+ * Reads a WhatsApp message-key id.
+ * Live protojson uses `ID` (`WACommon.MessageKey`). `id` is accepted as an alias.
+ */
+export function readMessageKeyId(key: unknown): string | null {
+  if (!isPlainObject(key)) {
+    return null;
+  }
+  return trimNonEmpty(key.ID) ?? trimNonEmpty(key.id);
+}
+
+/**
+ * Emoji text from a reaction field. Missing or blank text is a removal.
+ */
+function readReactionEmoji(value: unknown): string {
+  if (typeof value !== "string") {
+    return "";
+  }
+  return value.trim();
+}
+
+/**
+ * Picks the Queue row for a `waMessageId`.
+ * One row wins even when the chat JID differs. Several rows require a chat match.
+ */
+export function selectTrackedMessage(
+  rows: readonly TrackedMessageCandidate[],
+  chatJid: string,
+): TrackedMessageMatch | null {
+  if (rows.length === 1) {
+    const only = rows[0];
+    if (only === undefined) {
+      return null;
+    }
+    return {
+      id: only.id,
+      chatDiffers: only.groupJid !== chatJid,
+    };
+  }
+  if (rows.length === 0) {
+    return null;
+  }
+  const chat = chatJid.trim();
+  const matched = rows.filter((row) => row.groupJid === chat);
+  if (matched.length !== 1) {
+    return null;
+  }
+  const hit = matched[0];
+  if (hit === undefined) {
+    return null;
+  }
+  return { id: hit.id, chatDiffers: false };
+}
+
+/**
+ * Groups reaction rows for the badge. Blank emoji (removal) is omitted.
+ * Sort is count descending, then emoji ascending.
+ */
+export function buildReactionBreakdown(
+  rows: ReadonlyArray<{ emoji: string; count: number }>,
+): { reactionCount: number; reactionBreakdown: ReactionBreakdownEntry[] } {
+  const byEmoji = new Map<string, number>();
+  for (const row of rows) {
+    const emoji = row.emoji.trim();
+    if (emoji.length === 0 || !Number.isInteger(row.count) || row.count <= 0) {
+      continue;
+    }
+    const prev = byEmoji.get(emoji) ?? 0;
+    byEmoji.set(emoji, prev + row.count);
+  }
+  const reactionBreakdown: ReactionBreakdownEntry[] = [];
+  for (const [emoji, count] of byEmoji) {
+    reactionBreakdown.push({ emoji, count });
+  }
+  reactionBreakdown.sort((a, b) => {
+    if (b.count !== a.count) {
+      return b.count - a.count;
+    }
+    if (a.emoji < b.emoji) {
+      return -1;
+    }
+    if (a.emoji > b.emoji) {
+      return 1;
+    }
+    return 0;
+  });
+  let reactionCount = 0;
+  for (const entry of reactionBreakdown) {
+    reactionCount += entry.count;
+  }
+  return { reactionCount, reactionBreakdown };
+}
+
+/**
  * Extracts `contextInfo` from common WhatsApp message wrappers.
  */
 export function extractContextInfo(
@@ -225,15 +345,14 @@ export function parsePlainReactionMessage(
   if (!isPlainObject(reaction)) {
     return null;
   }
-  const key = reaction.key;
-  const targetId = isPlainObject(key)
-    ? trimNonEmpty(key.id)
-    : trimNonEmpty(reaction.messageID) ?? trimNonEmpty(reaction.messageId);
+  const targetId =
+    readMessageKeyId(reaction.key) ??
+    trimNonEmpty(reaction.messageID) ??
+    trimNonEmpty(reaction.messageId);
   if (targetId === null) {
     return null;
   }
-  const emojiRaw = reaction.text;
-  const emoji = typeof emojiRaw === "string" ? emojiRaw : "";
+  const emoji = readReactionEmoji(reaction.text);
   return {
     targetWaMessageId: targetId,
     emoji,
@@ -253,15 +372,14 @@ export function parseDecryptedReactionPayload(
   if (fromWrapper !== null) {
     return fromWrapper;
   }
-  const key = decrypted.key;
-  const targetId = isPlainObject(key)
-    ? trimNonEmpty(key.id)
-    : trimNonEmpty(decrypted.messageID) ?? trimNonEmpty(decrypted.messageId);
+  const targetId =
+    readMessageKeyId(decrypted.key) ??
+    trimNonEmpty(decrypted.messageID) ??
+    trimNonEmpty(decrypted.messageId);
   if (targetId === null) {
     return null;
   }
-  const emojiRaw = decrypted.text ?? decrypted.reaction;
-  const emoji = typeof emojiRaw === "string" ? emojiRaw : "";
+  const emoji = readReactionEmoji(decrypted.text ?? decrypted.reaction);
   return {
     targetWaMessageId: targetId,
     emoji,
@@ -277,6 +395,97 @@ export function hasEncryptedReaction(message: Record<string, unknown>): boolean 
 }
 
 /**
+ * True when the inbound payload is an encrypted announcement comment.
+ */
+export function hasEncryptedComment(message: Record<string, unknown>): boolean {
+  return isPlainObject(message.encCommentMessage);
+}
+
+/**
+ * Parent stanza id for an announcement comment (`targetMessageKey.ID`).
+ * Checks the encrypted wrapper first, then a plaintext `commentMessage`.
+ */
+export function parseCommentTargetId(message: Record<string, unknown>): string | null {
+  const encrypted = message.encCommentMessage;
+  if (isPlainObject(encrypted)) {
+    const fromEncrypted = readMessageKeyId(encrypted.targetMessageKey);
+    if (fromEncrypted !== null) {
+      return fromEncrypted;
+    }
+  }
+  const plain = message.commentMessage;
+  if (isPlainObject(plain)) {
+    return readMessageKeyId(plain.targetMessageKey);
+  }
+  return null;
+}
+
+/**
+ * Builds a reply event from a body payload aimed at `targetWaMessageId`.
+ */
+function buildTrackedReply(
+  targetWaMessageId: string,
+  replyWaMessageId: string,
+  bodySource: Record<string, unknown>,
+): ParsedReplyEvent | null {
+  const targetId = trimNonEmpty(targetWaMessageId);
+  const replyId = trimNonEmpty(replyWaMessageId);
+  if (targetId === null || replyId === null) {
+    return null;
+  }
+  return {
+    quotedWaMessageId: targetId,
+    replyWaMessageId: replyId,
+    bodyPreview: truncateBodyPreview(extractMessageBodyText(bodySource)),
+  };
+}
+
+/**
+ * Parses a plaintext `commentMessage` (announcement reply that is not encrypted).
+ */
+export function parsePlainCommentEvent(
+  message: Record<string, unknown>,
+  replyWaMessageId: string,
+): ParsedReplyEvent | null {
+  const comment = message.commentMessage;
+  if (!isPlainObject(comment)) {
+    return null;
+  }
+  const targetId = readMessageKeyId(comment.targetMessageKey);
+  if (targetId === null) {
+    return null;
+  }
+  const inner = isPlainObject(comment.message) ? comment.message : comment;
+  return buildTrackedReply(targetId, replyWaMessageId, inner);
+}
+
+/**
+ * Parses a body returned by `decryptComment`. The parent id comes from the wrapper.
+ */
+export function parseDecryptedCommentEvent(
+  decrypted: Record<string, unknown>,
+  targetWaMessageId: string,
+  replyWaMessageId: string,
+): ParsedReplyEvent | null {
+  return buildTrackedReply(targetWaMessageId, replyWaMessageId, decrypted);
+}
+
+/**
+ * Stanza id of a reply that was deleted for everyone.
+ * Only the string `"REVOKE"` counts. A missing type, or numeric `0`, does not.
+ */
+export function parseReplyRevokeId(message: Record<string, unknown>): string | null {
+  const protocol = message.protocolMessage;
+  if (!isPlainObject(protocol)) {
+    return null;
+  }
+  if (protocol.type !== "REVOKE") {
+    return null;
+  }
+  return readMessageKeyId(protocol.key);
+}
+
+/**
  * Parses a quoted reply targeting another stanza id.
  * Returns null when there is no quote (free-form chatter is ignored by design).
  */
@@ -288,8 +497,13 @@ export function parseQuotedReplyEvent(
   if (replyId === null) {
     return null;
   }
-  // Skip pure reaction payloads — handled by the reaction path.
-  if (isPlainObject(message.reactionMessage) || hasEncryptedReaction(message)) {
+  // Reactions and announcement comments are handled by their own parsers.
+  if (
+    isPlainObject(message.reactionMessage) ||
+    hasEncryptedReaction(message) ||
+    hasEncryptedComment(message) ||
+    isPlainObject(message.commentMessage)
+  ) {
     return null;
   }
   const quotedWaMessageId = extractQuotedWaMessageId(message);

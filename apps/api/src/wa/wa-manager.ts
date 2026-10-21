@@ -207,6 +207,57 @@ function engagementInfoRecord(info: {
   };
 }
 
+/**
+ * One searchable line for a group event. Chat and stanza id only — no member name or message body.
+ */
+function engagementEventRef(info: { chat: string; id: string }): string {
+  const chat = info.chat.trim().length > 0 ? info.chat.trim() : "(none)";
+  const eventId = info.id.trim().length > 0 ? info.id.trim() : "(none)";
+  return `chat=${chat} eventId=${eventId}`;
+}
+
+/**
+ * Flattens an error for one log line.
+ */
+function engagementErrorText(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  const flat = message.replace(/\s+/gu, " ").trim();
+  if (flat.length <= 300) {
+    return flat;
+  }
+  return `${flat.slice(0, 300)}…`;
+}
+
+/**
+ * Key names of a decrypt result, so a parser miss can be diagnosed without logging the body.
+ */
+function payloadKeyList(value: unknown): string {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return typeof value;
+  }
+  const keys = Object.keys(value).slice(0, 12);
+  if (keys.length === 0) {
+    return "(empty)";
+  }
+  return keys.join(",");
+}
+
+/**
+ * True when this group event is a reaction or announcement comment.
+ * Used only to log allowlist drops. Ordinary chatter stays quiet.
+ */
+function looksLikeTrackedEngagement(
+  message: Record<string, unknown>,
+  eventId: string | null,
+): boolean {
+  return (
+    hasEncryptedReaction(message) ||
+    hasEncryptedComment(message) ||
+    parsePlainReactionMessage(message, eventId) !== null ||
+    parsePlainCommentEvent(message, eventId ?? "") !== null
+  );
+}
+
 export class WaManager {
   private readonly env: ApiEnv;
 
@@ -1205,9 +1256,10 @@ export class WaManager {
      */
     client.on("message", (event) => {
       void this.handleInboundEngagement(event).catch((err: unknown) => {
+        const chat = event.info.chat;
+        const eventId = event.info.id;
         console.error(
-          `[WaManager] engagement ingest failed projectId=${this.projectId}:`,
-          err,
+          `[engagement] ingest failed projectId=${this.projectId} ${engagementEventRef({ chat, id: eventId })} error=${engagementErrorText(err)}`,
         );
       });
     });
@@ -1307,27 +1359,42 @@ export class WaManager {
     if (!event.info.isGroup) {
       return;
     }
+    const eventRef = engagementEventRef(event.info);
+    const reactionWaId = event.info.id.trim().length > 0 ? event.info.id.trim() : null;
     const allowlist = await this.loadEngagementAllowlist();
     if (!isEngagementChatAllowed(event.info.chat, allowlist)) {
+      if (looksLikeTrackedEngagement(event.message, reactionWaId)) {
+        this.logEngagement(
+          "warn",
+          `dropped chat not allowlisted ${eventRef} allowlist=${String(allowlist.size)}`,
+        );
+      }
       return;
     }
 
-    const reactionWaId = event.info.id.trim().length > 0 ? event.info.id.trim() : null;
     let reaction = parsePlainReactionMessage(event.message, reactionWaId);
 
     if (reaction === null && hasEncryptedReaction(event.message)) {
       const client = this.client;
-      if (client !== undefined) {
+      if (client === undefined) {
+        this.logEngagement("warn", `reaction skipped no-client ${eventRef}`);
+      } else {
         try {
           const decrypted = await client.decryptReaction(
             engagementInfoRecord(event.info),
             event.message,
           );
           reaction = parseDecryptedReactionPayload(decrypted, reactionWaId);
+          if (reaction === null) {
+            this.logEngagement(
+              "warn",
+              `reaction decrypt unparsed ${eventRef} keys=${payloadKeyList(decrypted)}`,
+            );
+          }
         } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err);
-          console.warn(
-            `[WaManager] decryptReaction failed projectId=${this.projectId}: ${msg}`,
+          this.logEngagement(
+            "warn",
+            `reaction decrypt failed ${eventRef} error=${engagementErrorText(err)}`,
           );
         }
       }
@@ -1341,20 +1408,29 @@ export class WaManager {
     if (hasEncryptedComment(event.message)) {
       const targetId = parseCommentTargetId(event.message);
       const client = this.client;
-      if (targetId !== null && client !== undefined) {
+      if (targetId === null) {
+        this.logEngagement("warn", `comment skipped no-target ${eventRef}`);
+      } else if (client === undefined) {
+        this.logEngagement("warn", `comment skipped no-client ${eventRef} target=${targetId}`);
+      } else {
         try {
           const decrypted = await client.decryptComment(
             engagementInfoRecord(event.info),
             event.message,
           );
           const reply = parseDecryptedCommentEvent(decrypted, targetId, event.info.id);
-          if (reply !== null) {
+          if (reply === null) {
+            this.logEngagement(
+              "warn",
+              `comment decrypt unparsed ${eventRef} target=${targetId} keys=${payloadKeyList(decrypted)}`,
+            );
+          } else {
             await this.upsertEngagementReply(event, reply);
           }
         } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err);
-          console.warn(
-            `[WaManager] decryptComment failed projectId=${this.projectId} target=${targetId}: ${msg}`,
+          this.logEngagement(
+            "warn",
+            `comment decrypt failed ${eventRef} target=${targetId} error=${engagementErrorText(err)}`,
           );
         }
       }
@@ -1380,13 +1456,29 @@ export class WaManager {
   }
 
   /**
+   * Writes one `[engagement]` line. `detail` must not include message text or member names.
+   */
+  private logEngagement(level: "info" | "warn" | "error", detail: string): void {
+    const line = `[engagement] projectId=${this.projectId} ${detail}`;
+    if (level === "error") {
+      console.error(line);
+      return;
+    }
+    if (level === "warn") {
+      console.warn(line);
+      return;
+    }
+    console.info(line);
+  }
+
+  /**
    * Loads the Queue row for a parent stanza id.
    * A single row is used even when the event chat JID differs. Several rows require a chat match.
    */
   private async findTrackedScheduledMessageId(
     waMessageId: string,
     chatJid: string,
-  ): Promise<string | null> {
+  ): Promise<{ id: string | null; rowCount: number }> {
     const rows = await this.prisma.scheduledMessage.findMany({
       where: {
         projectId: this.projectId,
@@ -1397,14 +1489,15 @@ export class WaManager {
     });
     const match = selectTrackedMessage(rows, chatJid);
     if (match === null) {
-      return null;
+      return { id: null, rowCount: rows.length };
     }
     if (match.chatDiffers) {
-      console.info(
-        `[WaManager] engagement chat differs projectId=${this.projectId} waMessageId=${waMessageId} chat=${chatJid}`,
+      this.logEngagement(
+        "info",
+        `chat differs waMessageId=${waMessageId} chat=${chatJid} rows=${String(rows.length)}`,
       );
     }
-    return match.id;
+    return { id: match.id, rowCount: rows.length };
   }
 
   /**
@@ -1413,17 +1506,22 @@ export class WaManager {
    */
   private async upsertEngagementReaction(
     event: {
-      info: { chat: string; sender: string; timestamp: number; pushName: string };
+      info: { id: string; chat: string; sender: string; timestamp: number; pushName: string };
     },
     reaction: ParsedReactionEvent,
   ): Promise<void> {
-    const scheduledMessageId = await this.findTrackedScheduledMessageId(
+    const tracked = await this.findTrackedScheduledMessageId(
       reaction.targetWaMessageId,
       event.info.chat,
     );
-    if (scheduledMessageId === null) {
+    if (tracked.id === null) {
+      this.logEngagement(
+        "warn",
+        `reaction unmatched waMessageId=${reaction.targetWaMessageId} rows=${String(tracked.rowCount)} ${engagementEventRef(event.info)}`,
+      );
       return;
     }
+    const scheduledMessageId = tracked.id;
     const reactedAt = waTimestampToDate(event.info.timestamp);
     const reactorName = trimNonEmpty(event.info.pushName);
     await this.prisma.messageReaction.upsert({
@@ -1448,6 +1546,11 @@ export class WaManager {
         ...(reactorName !== null ? { reactorName } : {}),
       },
     });
+    const removed = reaction.emoji.trim().length === 0;
+    this.logEngagement(
+      "info",
+      `reaction stored messageId=${scheduledMessageId} waMessageId=${reaction.targetWaMessageId} removed=${String(removed)}`,
+    );
   }
 
   /**
@@ -1456,17 +1559,22 @@ export class WaManager {
    */
   private async upsertEngagementReply(
     event: {
-      info: { chat: string; sender: string; timestamp: number; pushName: string };
+      info: { id: string; chat: string; sender: string; timestamp: number; pushName: string };
     },
     reply: ParsedReplyEvent,
   ): Promise<void> {
-    const scheduledMessageId = await this.findTrackedScheduledMessageId(
+    const tracked = await this.findTrackedScheduledMessageId(
       reply.quotedWaMessageId,
       event.info.chat,
     );
-    if (scheduledMessageId === null) {
+    if (tracked.id === null) {
+      this.logEngagement(
+        "warn",
+        `reply unmatched parentWaMessageId=${reply.quotedWaMessageId} rows=${String(tracked.rowCount)} ${engagementEventRef(event.info)}`,
+      );
       return;
     }
+    const scheduledMessageId = tracked.id;
     const repliedAt = waTimestampToDate(event.info.timestamp);
     const replierName = trimNonEmpty(event.info.pushName);
     await this.prisma.messageReply.upsert({
@@ -1491,6 +1599,10 @@ export class WaManager {
         ...(replierName !== null ? { replierName } : {}),
       },
     });
+    this.logEngagement(
+      "info",
+      `reply stored messageId=${scheduledMessageId} parentWaMessageId=${reply.quotedWaMessageId} replyWaMessageId=${reply.replyWaMessageId}`,
+    );
   }
 
   /**
@@ -1505,8 +1617,9 @@ export class WaManager {
       },
     });
     if (result.count > 0) {
-      console.info(
-        `[WaManager] revoked reply removed projectId=${this.projectId} replyWaMessageId=${replyWaMessageId} count=${String(result.count)}`,
+      this.logEngagement(
+        "info",
+        `reply revoked replyWaMessageId=${replyWaMessageId} count=${String(result.count)}`,
       );
     }
   }

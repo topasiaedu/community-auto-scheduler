@@ -1,13 +1,21 @@
 /**
  * Closes each finished scheduled post once.
- * Community Reminder batches update one Telegram status message.
- * Every other batch is marked handled with no WhatsApp post-update DM.
+ * Community Reminder batches update one Telegram board message.
+ * Community Value batches send one Telegram status message.
+ * Every other batch is marked handled with no chat message.
  * The daily digest is unchanged.
  */
 
 import type { PrismaClient } from "@nmcas/db";
 import type { ApiEnv } from "../env.js";
-import { isPostUpdateBatchReady } from "./postUpdateNotice.js";
+import {
+  formatValuePostTelegram,
+  isPostUpdateBatchReady,
+  isValuePostBatch,
+  type PostUpdateNoticeRow,
+  type PostUpdateRowStatus,
+} from "./postUpdateNotice.js";
+import { sendTelegramText } from "./telegramNotify.js";
 import {
   collectReminderBoard,
   deliverReminderBoard,
@@ -118,10 +126,29 @@ async function listCandidateBatchIds(prisma: PrismaClient): Promise<string[]> {
 }
 
 /**
- * Builds the Telegram board for a reminder batch, or closes any other ready batch with no chat message.
+ * Builds the Telegram board for a reminder batch, or a one-shot Telegram status for a Value batch.
+ * Any other ready batch is closed with no chat message.
  * A failed Telegram call leaves the batch unposted so a later sweep can retry.
  */
 async function settleBatch(
+  prisma: PrismaClient,
+  env: ApiEnv,
+  batchId: string,
+): Promise<void> {
+  try {
+    await settleOneBatch(prisma, env, batchId);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(
+      `[post-update] settle failed batch=${batchId} error=${clipPostUpdateLog(message)}`,
+    );
+  }
+}
+
+/**
+ * Settles one batch. Throws on unexpected database errors so the caller can log the batch id.
+ */
+async function settleOneBatch(
   prisma: PrismaClient,
   env: ApiEnv,
   batchId: string,
@@ -160,11 +187,7 @@ async function settleBatch(
 
   const reminder = collectReminderBoard(stored.map((row) => toBoardSource(row)));
   if (reminder === null) {
-    await prisma.postStatusNotice.update({
-      where: { batchId },
-      data: { postedAt: new Date(), body: "", error: null },
-    });
-    console.warn(`[post-update] closed without WhatsApp DM batch=${batchId}`);
+    await settleNonReminder(prisma, env, batchId, stored);
     return;
   }
 
@@ -182,6 +205,9 @@ async function settleBatch(
   const existing = await prisma.campaignReminderBoard.findUnique({
     where: { campaignId: reminder.campaignId },
   });
+  console.info(
+    `[post-update] reminder board sending batch=${batchId} campaignId=${reminder.campaignId} slots=${String(reminder.slots.length)}`,
+  );
   const delivered = await deliverReminderBoard({
     token: env.TELEGRAM_BOT_TOKEN,
     chatId: env.TELEGRAM_CHAT_ID,
@@ -197,7 +223,12 @@ async function settleBatch(
     slots: reminder.slots,
   });
   if (!delivered.ok) {
-    await markNoticeError(prisma, batchId, delivered.error);
+    await markNoticeError(
+      prisma,
+      batchId,
+      delivered.error,
+      `kind=reminder campaignId=${reminder.campaignId}`,
+    );
     return;
   }
 
@@ -221,14 +252,79 @@ async function settleBatch(
     where: { batchId },
     data: { postedAt: new Date(), body: delivered.text, error: null },
   });
+  const boardMessageId =
+    delivered.next.messageId === null ? "" : String(delivered.next.messageId);
   console.warn(
-    `[post-update] telegram board batch=${batchId} campaignId=${reminder.campaignId} telegramCalled=${String(delivered.telegramCalled)}`,
+    `[post-update] telegram board ok batch=${batchId} campaignId=${reminder.campaignId} telegramCalled=${String(delivered.telegramCalled)} messageId=${boardMessageId}`,
   );
 }
 
 /**
+ * Sends one Telegram status for a Value batch, or closes any other non-reminder batch.
+ * A Value post scheduled before the announce window is closed with no message.
+ */
+async function settleNonReminder(
+  prisma: PrismaClient,
+  env: ApiEnv,
+  batchId: string,
+  stored: readonly StoredSweepRow[],
+): Promise<void> {
+  const noticeRows = stored.map((row) => toNoticeRow(row));
+  if (!isValuePostBatch(noticeRows)) {
+    await markNoticePosted(prisma, batchId, "");
+    console.warn(`[post-update] closed without chat message batch=${batchId}`);
+    return;
+  }
+
+  const notBeforeMs = reminderAnnounceNotBeforeMs(processStartedAtMs, Date.now());
+  const scheduledAts = noticeRows.map((row) => row.scheduledAt);
+  if (!reminderBatchIsCurrent(scheduledAts, notBeforeMs)) {
+    await markNoticePosted(prisma, batchId, "");
+    console.warn(`[post-update] skipped old value status batch=${batchId}`);
+    return;
+  }
+
+  const text = formatValuePostTelegram(noticeRows);
+  if (text === null) {
+    await markNoticePosted(prisma, batchId, "");
+    console.warn(`[post-update] closed value batch with nothing to report batch=${batchId}`);
+    return;
+  }
+
+  const sentCount = noticeRows.filter((row) => row.status === "SENT").length;
+  const failedCount = noticeRows.filter((row) => row.status === "FAILED").length;
+  console.info(
+    `[post-update] value status sending batch=${batchId} sent=${String(sentCount)} failed=${String(failedCount)} chars=${String(text.length)}`,
+  );
+  const sent = await sendTelegramText(env.TELEGRAM_BOT_TOKEN, env.TELEGRAM_CHAT_ID, text);
+  if (!sent.ok) {
+    await markNoticeError(prisma, batchId, sent.error, "kind=value");
+    return;
+  }
+
+  await markNoticePosted(prisma, batchId, text);
+  console.warn(
+    `[post-update] telegram value ok batch=${batchId} messageId=${String(sent.messageId)} sent=${String(sentCount)} failed=${String(failedCount)}`,
+  );
+}
+
+/**
+ * Marks the batch finished so a later sweep does not send it again.
+ */
+async function markNoticePosted(
+  prisma: PrismaClient,
+  batchId: string,
+  body: string,
+): Promise<void> {
+  await prisma.postStatusNotice.update({
+    where: { batchId },
+    data: { postedAt: new Date(), body, error: null },
+  });
+}
+
+/**
  * Inserts the notice row, or re-claims it after a failed attempt goes stale.
- * Returns false when another sweep owns the batch or the DM was already sent.
+ * Returns false when another sweep owns the batch or the notice was already sent.
  */
 async function claimNotice(prisma: PrismaClient, batchId: string): Promise<boolean> {
   try {
@@ -250,6 +346,10 @@ async function claimNotice(prisma: PrismaClient, batchId: string): Promise<boole
     where: { batchId, postedAt: null, updatedAt: { lt: staleBefore } },
     data: { error: null },
   });
+  if (claimed.count === 0) {
+    const reason = existing.error === null ? "" : ` error=${clipPostUpdateLog(existing.error)}`;
+    console.info(`[post-update] retry waiting batch=${batchId}${reason}`);
+  }
   return claimed.count > 0;
 }
 
@@ -257,12 +357,61 @@ async function markNoticeError(
   prisma: PrismaClient,
   batchId: string,
   error: string,
+  context: string,
 ): Promise<void> {
   await prisma.postStatusNotice.update({
     where: { batchId },
     data: { error, postedAt: null },
   });
-  console.warn(`[post-update] not sent batch=${batchId}: ${error}`);
+  console.warn(
+    `[post-update] not sent batch=${batchId} ${context} error=${clipPostUpdateLog(error)}`,
+  );
+}
+
+/**
+ * One-line error text for the sweep log. The database still stores the full Telegram error.
+ */
+function clipPostUpdateLog(error: string): string {
+  const flat = error.replace(/\s+/gu, " ").trim();
+  if (flat.length <= 300) {
+    return flat;
+  }
+  return `${flat.slice(0, 300)}…`;
+}
+
+type StoredSweepRow = {
+  id: string;
+  groupName: string;
+  status: PostUpdateRowStatus;
+  error: string | null;
+  copyText: string | null;
+  operatorKind: "VALUE" | "REMINDER" | null;
+  valueFormat: PostUpdateNoticeRow["valueFormat"];
+  reminderFormat: PostUpdateNoticeRow["reminderFormat"];
+  type: "POST" | "POLL";
+  campaignId: string | null;
+  scheduledAt: Date;
+  project: { name: string };
+  reminderTemplate: StoredBoardRow["reminderTemplate"];
+};
+
+/**
+ * Maps a stored row into the Value Telegram formatter input.
+ */
+function toNoticeRow(row: StoredSweepRow): PostUpdateNoticeRow {
+  return {
+    groupName: row.groupName,
+    status: row.status,
+    error: row.error,
+    copyText: row.copyText,
+    operatorKind: row.operatorKind,
+    valueFormat: row.valueFormat,
+    reminderFormat: row.reminderFormat,
+    slotName: null,
+    scheduledAt: row.scheduledAt,
+    projectName: row.project.name,
+    legacyType: row.type,
+  };
 }
 
 type StoredBoardRow = {

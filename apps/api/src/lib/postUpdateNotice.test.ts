@@ -3,8 +3,10 @@ import { describe, it } from "node:test";
 import { mytInstant } from "./campaignSchedule.js";
 import {
   communityLabel,
-  formatPostUpdateNotice,
+  formatValuePostTelegram,
   isPostUpdateBatchReady,
+  isValuePostBatch,
+  formatPostUpdateNotice,
   type PostUpdateNoticeRow,
 } from "./postUpdateNotice.js";
 
@@ -148,6 +150,81 @@ describe("formatPostUpdateNotice", () => {
   it("uses the name before the community separator", () => {
     assert.equal(communityLabel("RDW 6.0 › RDW 6.0"), "RDW 6.0");
     assert.equal(communityLabel("RDW"), "RDW");
+  });
+});
+
+describe("formatValuePostTelegram", () => {
+  it("lists each community as Sent or Failed for the Telegram group", () => {
+    const text = formatValuePostTelegram([
+      row({
+        groupName: "RDW 6.0 › RDW 6.0",
+        status: "SENT",
+        copyText: `${VALUE_PREVIEW} — join us tomorrow.`,
+      }),
+      row({
+        groupName: "RDW 4.0",
+        status: "FAILED",
+        error: "WhatsApp engine exited",
+        copyText: VALUE_PREVIEW,
+      }),
+    ]);
+    assert.equal(
+      text,
+      [
+        "Project: Dr Jasmine",
+        "📢 Community Value",
+        "9 Oct 2026, 11:00 MYT",
+        "Post: Value · image + caption",
+        `Preview: ${VALUE_PREVIEW}…`,
+        "• RDW 6.0  🟢Sent",
+        "• RDW 4.0  🔴Failed — WhatsApp engine exited",
+        "",
+        "Sent means WhatsApp acknowledged the send. Open the community to confirm the post is on screen.",
+      ].join("\n"),
+    );
+  });
+
+  it("returns null for a reminder batch", () => {
+    const text = formatValuePostTelegram([
+      row({
+        groupName: "RDW 6.0",
+        status: "SENT",
+        operatorKind: "REMINDER",
+        valueFormat: null,
+        slotName: "Starting Soon",
+      }),
+    ]);
+    assert.equal(text, null);
+    assert.equal(isValuePostBatch([{ operatorKind: "REMINDER" }]), false);
+    assert.equal(isValuePostBatch([{ operatorKind: "VALUE" }]), true);
+  });
+
+  it("returns null when every value row is cancelled or draft", () => {
+    const text = formatValuePostTelegram([
+      row({ groupName: "RDW 6.0", status: "CANCELLED" }),
+      row({ groupName: "RDW 5.0", status: "DRAFT" }),
+    ]);
+    assert.equal(text, null);
+  });
+
+  it("keeps every Failed line when the body is too long", () => {
+    const longName = "Community name ".repeat(12).trim();
+    const rows: PostUpdateNoticeRow[] = [
+      row({
+        groupName: "RDW 4.0",
+        status: "FAILED",
+        error: "No WhatsApp server receipt",
+        copyText: VALUE_PREVIEW,
+      }),
+    ];
+    for (let i = 0; i < 80; i += 1) {
+      rows.push(row({ groupName: `${longName} ${String(i)}`, status: "SENT", copyText: VALUE_PREVIEW }));
+    }
+    const text = formatValuePostTelegram(rows);
+    assert.ok(text !== null);
+    assert.equal(text.includes("• RDW 4.0  🔴Failed — No WhatsApp server receipt"), true);
+    assert.match(text, /… \+\d+ Sent/);
+    assert.ok(text.length <= 3500);
   });
 });
 

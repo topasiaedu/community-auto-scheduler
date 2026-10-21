@@ -686,107 +686,117 @@ export function registerMessageRoutes(
       (String(req.query.includeRecent) === "1" ||
         String(req.query.includeRecent).toLowerCase() === "true");
 
-    const row = await prisma.scheduledMessage.findFirst({
-      where: { id, projectId },
-      select: { id: true },
-    });
-    if (row === null) {
-      return reply.code(404).send({ error: "Message not found" });
-    }
+    try {
+      const row = await prisma.scheduledMessage.findFirst({
+        where: { id, projectId },
+        select: { id: true },
+      });
+      if (row === null) {
+        return reply.code(404).send({ error: "Message not found" });
+      }
 
-    const [groupedReactions, replyCount] = await Promise.all([
-      prisma.messageReaction.groupBy({
-        by: ["emoji"],
-        where: { scheduledMessageId: row.id },
-        _count: { _all: true },
-      }),
-      prisma.messageReply.count({
-        where: { scheduledMessageId: row.id },
-      }),
-    ]);
-    const { reactionCount, reactionBreakdown } = buildReactionBreakdown(
-      groupedReactions.map((group) => ({
-        emoji: group.emoji,
-        count: group._count._all,
-      })),
-    );
-
-    const payload: {
-      messageId: string;
-      reactionCount: number;
-      replyCount: number;
-      reactionBreakdown: Array<{ emoji: string; count: number }>;
-      recentReactions?: Array<{
-        id: string;
-        reactorJid: string;
-        reactorName: string | null;
-        emoji: string;
-        reactedAt: string;
-      }>;
-      recentReplies?: Array<{
-        id: string;
-        replyWaMessageId: string;
-        replierJid: string;
-        replierName: string | null;
-        bodyPreview: string | null;
-        repliedAt: string;
-      }>;
-    } = {
-      messageId: row.id,
-      reactionCount,
-      replyCount,
-      reactionBreakdown,
-    };
-
-    if (includeRecent) {
-      const [reactions, replies] = await Promise.all([
-        prisma.messageReaction.findMany({
-          where: {
-            scheduledMessageId: row.id,
-            emoji: { not: "" },
-          },
-          select: {
-            id: true,
-            reactorJid: true,
-            reactorName: true,
-            emoji: true,
-            reactedAt: true,
-          },
-          orderBy: { reactedAt: "desc" },
-          take: ENGAGEMENT_RECENT_LIST_DEFAULT,
-        }),
-        prisma.messageReply.findMany({
+      const [groupedReactions, replyCount] = await Promise.all([
+        prisma.messageReaction.groupBy({
+          by: ["emoji"],
           where: { scheduledMessageId: row.id },
-          select: {
-            id: true,
-            replyWaMessageId: true,
-            replierJid: true,
-            replierName: true,
-            bodyPreview: true,
-            repliedAt: true,
-          },
-          orderBy: { repliedAt: "desc" },
-          take: ENGAGEMENT_RECENT_LIST_DEFAULT,
+          _count: { _all: true },
+        }),
+        prisma.messageReply.count({
+          where: { scheduledMessageId: row.id },
         }),
       ]);
-      payload.recentReactions = reactions.map((reaction) => ({
-        id: reaction.id,
-        reactorJid: reaction.reactorJid,
-        reactorName: reaction.reactorName,
-        emoji: reaction.emoji,
-        reactedAt: reaction.reactedAt.toISOString(),
-      }));
-      payload.recentReplies = replies.map((replyRow) => ({
-        id: replyRow.id,
-        replyWaMessageId: replyRow.replyWaMessageId,
-        replierJid: replyRow.replierJid,
-        replierName: replyRow.replierName,
-        bodyPreview: replyRow.bodyPreview,
-        repliedAt: replyRow.repliedAt.toISOString(),
-      }));
-    }
+      const { reactionCount, reactionBreakdown } = buildReactionBreakdown(
+        groupedReactions.map((group) => ({
+          emoji: group.emoji,
+          count: group._count._all,
+        })),
+      );
 
-    return payload;
+      const payload: {
+        messageId: string;
+        reactionCount: number;
+        replyCount: number;
+        reactionBreakdown: Array<{ emoji: string; count: number }>;
+        recentReactions?: Array<{
+          id: string;
+          reactorJid: string;
+          reactorName: string | null;
+          emoji: string;
+          reactedAt: string;
+        }>;
+        recentReplies?: Array<{
+          id: string;
+          replyWaMessageId: string;
+          replierJid: string;
+          replierName: string | null;
+          bodyPreview: string | null;
+          repliedAt: string;
+        }>;
+      } = {
+        messageId: row.id,
+        reactionCount,
+        replyCount,
+        reactionBreakdown,
+      };
+
+      if (includeRecent) {
+        const [reactions, replies] = await Promise.all([
+          prisma.messageReaction.findMany({
+            where: {
+              scheduledMessageId: row.id,
+              emoji: { not: "" },
+            },
+            select: {
+              id: true,
+              reactorJid: true,
+              reactorName: true,
+              emoji: true,
+              reactedAt: true,
+            },
+            orderBy: { reactedAt: "desc" },
+            take: ENGAGEMENT_RECENT_LIST_DEFAULT,
+          }),
+          prisma.messageReply.findMany({
+            where: { scheduledMessageId: row.id },
+            select: {
+              id: true,
+              replyWaMessageId: true,
+              replierJid: true,
+              replierName: true,
+              bodyPreview: true,
+              repliedAt: true,
+            },
+            orderBy: { repliedAt: "desc" },
+            take: ENGAGEMENT_RECENT_LIST_DEFAULT,
+          }),
+        ]);
+        payload.recentReactions = reactions.map((reaction) => ({
+          id: reaction.id,
+          reactorJid: reaction.reactorJid,
+          reactorName: reaction.reactorName,
+          emoji: reaction.emoji,
+          reactedAt: reaction.reactedAt.toISOString(),
+        }));
+        payload.recentReplies = replies.map((replyRow) => ({
+          id: replyRow.id,
+          replyWaMessageId: replyRow.replyWaMessageId,
+          replierJid: replyRow.replierJid,
+          replierName: replyRow.replierName,
+          bodyPreview: replyRow.bodyPreview,
+          repliedAt: replyRow.repliedAt.toISOString(),
+        }));
+      }
+
+      return payload;
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      const flat = message.replace(/\s+/gu, " ").trim();
+      const clipped = flat.length <= 300 ? flat : `${flat.slice(0, 300)}…`;
+      console.error(
+        `[engagement] read failed projectId=${projectId} messageId=${id} error=${clipped}`,
+      );
+      return reply.code(500).send({ error: "Could not load engagement" });
+    }
   });
 
   app.post("/messages/:id/cancel", async (req: FastifyRequest, reply: FastifyReply) => {

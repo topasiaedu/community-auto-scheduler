@@ -132,7 +132,7 @@ export function reminderBatchIsCurrent(
 
 /**
  * Turns a settled reminder batch into board slots, or null when this batch is not a campaign reminder.
- * Value posts and reminders with no campaign return null so the sweep can close them without Telegram.
+ * Value posts return null here. The sweep sends those as a separate Telegram status message.
  */
 export function collectReminderBoard(
   rows: readonly ReminderBatchSourceRow[],

@@ -24,7 +24,7 @@ When a Community Reminder slot finishes, the bot updates **one Telegram message 
 
 You read that message. If the latest line says Failed, you send that reminder in WhatsApp yourself. The next time a slot finishes, every earlier line is shown as Sent. The board does not ask WhatsApp whether that hand send landed.
 
-Value posts are not on this board. They also stop getting a WhatsApp post-update DM. Their result stays in the Queue, and the next morning digest still lists the day.
+Value posts are not edited onto this reminder board. When a Value fan-out finishes, the same bot sends **one new message** in the same group. Each community line says Sent or Failed from the Queue. There is still no WhatsApp post-update DM. The morning digest still lists the day. A Value post from before the announce window is closed with no Telegram message.
 
 The board can lag about a minute after the Queue shows Sent, because it uses the existing once-a-minute sweep. A failure can take the receipt wait as well (default 90 seconds) before the line says Failed.
 
@@ -119,12 +119,12 @@ After Phase 4:
 | Message | What happens |
 |---------|----------------|
 | `[NMCAS] Post update` after each reminder slot | Stops |
-| `[NMCAS] Post update` after each Value fan-out | Stops |
+| `[NMCAS] Post update` after each Value fan-out | Stops. One Telegram status message is sent instead |
 | Daily digest (default 8:00 AM MYT) | Unchanged |
 | Already delivered post updates | Not recalled |
 | Telegram disconnect / connected-again alerts | Unchanged |
 
-The once-a-minute sweep in [apps/api/src/lib/postUpdateSweep.ts](../../../apps/api/src/lib/postUpdateSweep.ts) stays. It is the timer. A reminder batch updates the Telegram board. A Value batch is marked handled and sends no chat message. Batches that already have `PostStatusNotice.postedAt` are left alone, so old campaigns are not backfilled.
+The once-a-minute sweep in [apps/api/src/lib/postUpdateSweep.ts](../../../apps/api/src/lib/postUpdateSweep.ts) stays. It is the timer. A reminder batch updates the Telegram board. A Value batch sends one Telegram status and does not call `sendDirectText`. Batches that already have `PostStatusNotice.postedAt` are left alone, so old campaigns are not backfilled.
 
 ---
 

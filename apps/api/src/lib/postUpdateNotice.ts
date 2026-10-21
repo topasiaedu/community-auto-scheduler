@@ -1,5 +1,6 @@
 /**
- * Formats the ops WhatsApp DM sent once when a scheduled post finishes.
+ * Formats the ops notice sent once when a scheduled post finishes.
+ * Reminders use the Telegram board. Value posts use {@link formatValuePostTelegram}.
  * Sent/Failed match Queue. The footer tells the reader to open the community.
  */
 
@@ -17,6 +18,13 @@ export const POST_UPDATE_SETTLE_BUFFER_MS = 30_000;
 
 const FOOTER =
   "Sent means WhatsApp acknowledged the send. Open the community to confirm the post is on screen.";
+
+/** Same marks as the Community Reminder board, so the group reads one way. */
+const VALUE_MARK_SENT = "🟢Sent";
+const VALUE_MARK_FAILED = "🔴Failed";
+
+/** Failed detail on one Telegram line. The Queue still stores the full error. */
+const MAX_VALUE_STATUS_ERROR = 160;
 
 export type PostUpdateRowStatus =
   | "PENDING"
@@ -119,6 +127,87 @@ export function formatPostUpdateNotice(rows: readonly PostUpdateNoticeRow[]): st
 }
 
 /**
+ * True when this batch is a Community Value fan-out.
+ * A reminder batch stays on the Telegram board instead.
+ */
+export function isValuePostBatch(
+  rows: readonly { operatorKind: "VALUE" | "REMINDER" | null }[],
+): boolean {
+  if (rows.length === 0) {
+    return false;
+  }
+  let sawValue = false;
+  for (const row of rows) {
+    if (row.operatorKind === "REMINDER") {
+      return false;
+    }
+    if (row.operatorKind === "VALUE") {
+      sawValue = true;
+      continue;
+    }
+    if (row.operatorKind !== null) {
+      return false;
+    }
+  }
+  return sawValue;
+}
+
+/**
+ * One Telegram message for a finished Value post.
+ * Each community keeps its own Queue result. Returns null when there is nothing to report
+ * or the batch is not entirely Value rows.
+ */
+export function formatValuePostTelegram(rows: readonly PostUpdateNoticeRow[]): string | null {
+  if (!isValuePostBatch(rows)) {
+    return null;
+  }
+  const reportable = rows.filter(
+    (row) =>
+      row.status === "SENT" ||
+      row.status === "FAILED" ||
+      row.status === "PENDING" ||
+      row.status === "SENDING",
+  );
+  const sample = reportable[0];
+  if (sample === undefined) {
+    return null;
+  }
+
+  const projectName = sample.projectName.trim().length > 0 ? sample.projectName.trim() : "Project";
+  const header = [
+    `Project: ${projectName}`,
+    "📢 Community Value",
+    formatWhenMyt(sample.scheduledAt),
+    `Post: ${postTitle(sample)}`,
+  ];
+  const preview = previewText(sample);
+  if (preview !== null) {
+    header.push(`Preview: ${preview}`);
+  }
+
+  const communityLines = reportable.map((row) => toValueCommunityLine(row));
+  let omittedSent = 0;
+  let kept = communityLines;
+  while (
+    assembleValue(header, kept, reportable.length).length > MAX_NOTICE_CHARS &&
+    omittedSent < countSent(reportable)
+  ) {
+    const next = dropLastSentLine(reportable, kept);
+    if (next === null) {
+      break;
+    }
+    kept = next.lines;
+    omittedSent = next.omittedSent;
+  }
+
+  let text = assembleValue(header, kept, reportable.length);
+  if (text.length > MAX_NOTICE_CHARS) {
+    text = `${text.slice(0, MAX_NOTICE_CHARS - 1)}…`;
+  }
+  return text;
+}
+
+/**
  * Shortens an error the same way the old failure DM did.
  */
 export function truncateNotifyError(message: string): string {
@@ -178,6 +267,51 @@ function previewText(row: PostUpdateNoticeRow): string | null {
   const clipped =
     firstLine.length <= PREVIEW_MAX_CHARS ? firstLine : firstLine.slice(0, PREVIEW_MAX_CHARS);
   return `${clipped}…`;
+}
+
+function toValueCommunityLine(
+  row: PostUpdateNoticeRow,
+): { kind: "sent" | "failed" | "open"; text: string } {
+  const label = communityLabel(row.groupName);
+  if (row.status === "FAILED") {
+    const detail = shortValueError(row.error);
+    if (detail.length === 0) {
+      return { kind: "failed", text: `• ${label}  ${VALUE_MARK_FAILED}` };
+    }
+    return { kind: "failed", text: `• ${label}  ${VALUE_MARK_FAILED} — ${detail}` };
+  }
+  if (row.status === "PENDING" || row.status === "SENDING") {
+    return { kind: "open", text: `• ${label}  Sending` };
+  }
+  return { kind: "sent", text: `• ${label}  ${VALUE_MARK_SENT}` };
+}
+
+/**
+ * One-line failure reason for the Telegram status. Newlines are flattened.
+ */
+function shortValueError(error: string | null): string {
+  if (error === null) {
+    return "";
+  }
+  const flat = error.replace(/\s+/gu, " ").trim();
+  if (flat.length <= MAX_VALUE_STATUS_ERROR) {
+    return flat;
+  }
+  return `${flat.slice(0, MAX_VALUE_STATUS_ERROR)}…`;
+}
+
+function assembleValue(
+  header: readonly string[],
+  lines: readonly { kind: "sent" | "failed" | "open"; text: string }[],
+  communityCount: number,
+): string {
+  const omittedSent = communityCount - lines.length;
+  const body = [...header, ...lines.map((line) => line.text)];
+  if (omittedSent > 0) {
+    body.push(`… +${String(omittedSent)} Sent`);
+  }
+  body.push("", FOOTER);
+  return body.join("\n");
 }
 
 function toCommunityLine(row: PostUpdateNoticeRow): { kind: "sent" | "failed" | "open"; text: string } {

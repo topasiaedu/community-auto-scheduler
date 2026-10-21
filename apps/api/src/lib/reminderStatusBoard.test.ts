@@ -234,7 +234,7 @@ describe("reminderAnnounceNotBeforeMs", () => {
 });
 
 describe("collectReminderBoard", () => {
-  it("returns null for a Value batch so no Telegram board is built", () => {
+  it("returns null for a Value batch so the reminder board is not used", () => {
     const collected = collectReminderBoard([
       source({
         id: "value-1",

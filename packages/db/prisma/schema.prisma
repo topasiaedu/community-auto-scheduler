@@ -184,7 +184,8 @@ model ScheduledMessage {
 }
 
 /// One handled fan-out batch. `postedAt` stays null until the sweep finishes it.
-/// A Community Reminder batch waits for the Telegram board. Other batches are closed with no WhatsApp DM.
+/// A Community Reminder batch waits for the Telegram board.
+/// A Value batch waits for one Telegram status message. Other batches are closed with no chat message.
 model PostStatusNotice {
   id        String    @id @default(cuid())
   batchId   String    @unique

@@ -12,13 +12,17 @@ import {
   parseCommentTargetId,
   parseDecryptedCommentEvent,
   parseDecryptedReactionPayload,
+  extractDeviceSentDestinationChat,
   parseEncryptedReactionTargetId,
+  parseEngagementTargetChat,
   parsePlainCommentEvent,
   parsePlainReactionMessage,
   parseQuotedReplyEvent,
   parseReplyRevokeId,
+  resolveEngagementChat,
   selectTrackedMessage,
   truncateBodyPreview,
+  unwrapMessagePayload,
   waTimestampToDate,
 } from "./waEngagement.js";
 
@@ -194,6 +198,41 @@ describe("waEngagement helpers", () => {
       emoji: "👍",
       waReactionId: "3EB0178947CFDCF9E1A6D3",
     });
+  });
+
+  it("unwraps ephemeral and deviceSent wrappers around an encrypted reaction", () => {
+    const nested = {
+      ephemeralMessage: {
+        message: {
+          deviceSentMessage: {
+            destinationJID: "120363427934897913@g.us",
+            message: {
+              encReactionMessage: {
+                targetMessageKey: {
+                  ID: "3EB06C82FA30663F585EA6",
+                  remoteJID: "120363427934897913@g.us",
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+    assert.equal(
+      extractDeviceSentDestinationChat(nested),
+      "120363427934897913@g.us",
+    );
+    assert.equal(parseEncryptedReactionTargetId(nested), "3EB06C82FA30663F585EA6");
+    assert.equal(parseEngagementTargetChat(nested), "120363427934897913@g.us");
+    assert.equal(
+      resolveEngagementChat(nested, "wrong-chat@g.us"),
+      "120363427934897913@g.us",
+    );
+    assert.equal(hasEncryptedReaction(nested), true);
+    assert.equal(
+      unwrapMessagePayload(nested).encReactionMessage !== undefined,
+      true,
+    );
   });
 
   it("hasEncryptedComment detects encCommentMessage", () => {

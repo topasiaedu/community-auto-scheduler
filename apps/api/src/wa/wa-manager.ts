@@ -24,8 +24,10 @@ import {
   parsePlainReactionMessage,
   parseQuotedReplyEvent,
   parseReplyRevokeId,
+  resolveEngagementChat,
   selectTrackedMessage,
   trimNonEmpty,
+  unwrapMessagePayload,
   waTimestampToDate,
   type ParsedReactionEvent,
   type ParsedReplyEvent,
@@ -1342,8 +1344,9 @@ export class WaManager {
   }
 
   /**
-   * Ingests reactions, announcement comments, quoted replies, and reply revokes
-   * for allowlisted community chats only. Matches on `ScheduledMessage.waMessageId`.
+   * Ingests reactions, announcement comments, quoted replies, and reply revokes.
+   * Prefer the companion destination chat or the encrypted target's remote JID when
+   * `info.chat` is not the announcement group. Match on `ScheduledMessage.waMessageId`.
    */
   private async handleInboundEngagement(event: {
     info: {
@@ -1360,57 +1363,80 @@ export class WaManager {
     if (!event.info.isGroup) {
       return;
     }
-    const eventRef = engagementEventRef(event.info);
+    const payload = unwrapMessagePayload(event.message);
+    const engagementChat = resolveEngagementChat(event.message, event.info.chat);
+    const eventRef = engagementEventRef({ chat: engagementChat, id: event.info.id });
     const reactionWaId = event.info.id.trim().length > 0 ? event.info.id.trim() : null;
     const allowlist = await this.loadEngagementAllowlist();
-    if (!isEngagementChatAllowed(event.info.chat, allowlist)) {
-      if (looksLikeTrackedEngagement(event.message, reactionWaId)) {
+    const chatAllowed = isEngagementChatAllowed(engagementChat, allowlist);
+    const wrapperTargetId =
+      parseEncryptedReactionTargetId(payload) ?? parseCommentTargetId(payload);
+    let allowedByTarget = false;
+    if (!chatAllowed && wrapperTargetId !== null) {
+      const tracked = await this.findTrackedScheduledMessageId(
+        wrapperTargetId,
+        engagementChat,
+      );
+      allowedByTarget = tracked.id !== null;
+      if (allowedByTarget) {
+        this.logEngagement(
+          "info",
+          `chat bypass by target waMessageId=${wrapperTargetId} eventChat=${event.info.chat} engagementChat=${engagementChat}`,
+        );
+      }
+    }
+    if (!chatAllowed && !allowedByTarget) {
+      if (looksLikeTrackedEngagement(payload, reactionWaId)) {
         this.logEngagement(
           "warn",
-          `dropped chat not allowlisted ${eventRef} allowlist=${String(allowlist.size)}`,
+          `dropped chat not allowlisted ${eventRef} eventChat=${event.info.chat} allowlist=${String(allowlist.size)}`,
         );
       }
       return;
     }
 
-    let reaction = parsePlainReactionMessage(event.message, reactionWaId);
+    const matchChat = engagementChat;
+    let reaction = parsePlainReactionMessage(payload, reactionWaId);
 
-    if (reaction === null && hasEncryptedReaction(event.message)) {
+    if (reaction === null && hasEncryptedReaction(payload)) {
       const client = this.client;
-      const wrapperTargetId = parseEncryptedReactionTargetId(event.message);
+      const targetId = parseEncryptedReactionTargetId(payload);
       if (client === undefined) {
         this.logEngagement("warn", `reaction skipped no-client ${eventRef}`);
-      } else if (wrapperTargetId === null) {
+      } else if (targetId === null) {
         this.logEngagement("warn", `reaction skipped no-target ${eventRef}`);
       } else {
         try {
           const decrypted = await client.decryptReaction(
-            engagementInfoRecord(event.info),
-            event.message,
+            engagementInfoRecord({ ...event.info, chat: matchChat }),
+            payload,
           );
-          reaction = parseDecryptedReactionPayload(decrypted, reactionWaId, wrapperTargetId);
+          reaction = parseDecryptedReactionPayload(decrypted, reactionWaId, targetId);
           if (reaction === null) {
             this.logEngagement(
               "warn",
-              `reaction decrypt unparsed ${eventRef} target=${wrapperTargetId} keys=${payloadKeyList(decrypted)}`,
+              `reaction decrypt unparsed ${eventRef} target=${targetId} keys=${payloadKeyList(decrypted)}`,
             );
           }
         } catch (err: unknown) {
           this.logEngagement(
             "warn",
-            `reaction decrypt failed ${eventRef} target=${wrapperTargetId} error=${engagementErrorText(err)}`,
+            `reaction decrypt failed ${eventRef} target=${targetId} error=${engagementErrorText(err)}`,
           );
         }
       }
     }
 
     if (reaction !== null) {
-      await this.upsertEngagementReaction(event, reaction);
+      await this.upsertEngagementReaction(
+        { info: { ...event.info, chat: matchChat } },
+        reaction,
+      );
       return;
     }
 
-    if (hasEncryptedComment(event.message)) {
-      const targetId = parseCommentTargetId(event.message);
+    if (hasEncryptedComment(payload)) {
+      const targetId = parseCommentTargetId(payload);
       const client = this.client;
       if (targetId === null) {
         this.logEngagement("warn", `comment skipped no-target ${eventRef}`);
@@ -1419,8 +1445,8 @@ export class WaManager {
       } else {
         try {
           const decrypted = await client.decryptComment(
-            engagementInfoRecord(event.info),
-            event.message,
+            engagementInfoRecord({ ...event.info, chat: matchChat }),
+            payload,
           );
           const reply = parseDecryptedCommentEvent(decrypted, targetId, event.info.id);
           if (reply === null) {
@@ -1429,7 +1455,10 @@ export class WaManager {
               `comment decrypt unparsed ${eventRef} target=${targetId} keys=${payloadKeyList(decrypted)}`,
             );
           } else {
-            await this.upsertEngagementReply(event, reply);
+            await this.upsertEngagementReply(
+              { info: { ...event.info, chat: matchChat } },
+              reply,
+            );
           }
         } catch (err: unknown) {
           this.logEngagement(
@@ -1441,19 +1470,25 @@ export class WaManager {
       return;
     }
 
-    const plainComment = parsePlainCommentEvent(event.message, event.info.id);
+    const plainComment = parsePlainCommentEvent(payload, event.info.id);
     if (plainComment !== null) {
-      await this.upsertEngagementReply(event, plainComment);
+      await this.upsertEngagementReply(
+        { info: { ...event.info, chat: matchChat } },
+        plainComment,
+      );
       return;
     }
 
-    const reply = parseQuotedReplyEvent(event.message, event.info.id);
+    const reply = parseQuotedReplyEvent(payload, event.info.id);
     if (reply !== null) {
-      await this.upsertEngagementReply(event, reply);
+      await this.upsertEngagementReply(
+        { info: { ...event.info, chat: matchChat } },
+        reply,
+      );
       return;
     }
 
-    const revokedReplyId = parseReplyRevokeId(event.message);
+    const revokedReplyId = parseReplyRevokeId(payload);
     if (revokedReplyId !== null) {
       await this.deleteRevokedReply(revokedReplyId);
     }
@@ -1553,7 +1588,7 @@ export class WaManager {
     const removed = reaction.emoji.trim().length === 0;
     this.logEngagement(
       "info",
-      `reaction stored messageId=${scheduledMessageId} waMessageId=${reaction.targetWaMessageId} removed=${String(removed)}`,
+      `reaction stored messageId=${scheduledMessageId} waMessageId=${reaction.targetWaMessageId} chat=${event.info.chat} removed=${String(removed)}`,
     );
   }
 
@@ -1605,7 +1640,7 @@ export class WaManager {
     });
     this.logEngagement(
       "info",
-      `reply stored messageId=${scheduledMessageId} parentWaMessageId=${reply.quotedWaMessageId} replyWaMessageId=${reply.replyWaMessageId}`,
+      `reply stored messageId=${scheduledMessageId} parentWaMessageId=${reply.quotedWaMessageId} replyWaMessageId=${reply.replyWaMessageId} chat=${event.info.chat}`,
     );
   }
 

@@ -158,7 +158,128 @@ export function readMessageKeyId(key: unknown): string | null {
   if (!isPlainObject(key)) {
     return null;
   }
-  return trimNonEmpty(key.ID) ?? trimNonEmpty(key.id);
+  return (
+    trimNonEmpty(key.ID) ??
+    trimNonEmpty(key.id) ??
+    trimNonEmpty(key.stanzaID) ??
+    trimNonEmpty(key.stanzaId)
+  );
+}
+
+/**
+ * Unwraps structural envelope wrappers WhatsApp uses around message payloads
+ * (e.g. disappearing/ephemeral messages, view-once, device-sent companion sync).
+ */
+export function unwrapMessagePayload(
+  message: Record<string, unknown>,
+): Record<string, unknown> {
+  let current: Record<string, unknown> = message;
+  const wrapperKeys = [
+    "ephemeralMessage",
+    "viewOnceMessage",
+    "viewOnceMessageV2",
+    "viewOnceMessageV2Extension",
+    "documentWithCaptionMessage",
+    "deviceSentMessage",
+  ] as const;
+
+  let unwrapped = true;
+  let depth = 0;
+  while (unwrapped && depth < 5) {
+    unwrapped = false;
+    depth += 1;
+    for (const key of wrapperKeys) {
+      const nested = current[key];
+      if (isPlainObject(nested) && isPlainObject(nested.message)) {
+        current = nested.message as Record<string, unknown>;
+        unwrapped = true;
+        break;
+      }
+    }
+  }
+  return current;
+}
+
+/**
+ * Destination group JID from a `deviceSentMessage` wrapper, when present.
+ * Companion-device sync often puts the real group here while `info.chat` is wrong.
+ */
+export function extractDeviceSentDestinationChat(
+  message: Record<string, unknown>,
+): string | null {
+  let current: Record<string, unknown> = message;
+  for (let depth = 0; depth < 5; depth += 1) {
+    if (isPlainObject(current.deviceSentMessage)) {
+      const dsm = current.deviceSentMessage;
+      const dest =
+        trimNonEmpty(dsm.destinationJID) ?? trimNonEmpty(dsm.destinationJid);
+      if (dest !== null) {
+        return dest;
+      }
+    }
+    let next: Record<string, unknown> | null = null;
+    for (const key of [
+      "ephemeralMessage",
+      "viewOnceMessage",
+      "viewOnceMessageV2",
+      "viewOnceMessageV2Extension",
+      "documentWithCaptionMessage",
+      "deviceSentMessage",
+    ] as const) {
+      const nested = current[key];
+      if (isPlainObject(nested) && isPlainObject(nested.message)) {
+        next = nested.message;
+        break;
+      }
+    }
+    if (next === null) {
+      break;
+    }
+    current = next;
+  }
+  return null;
+}
+
+/**
+ * Group JID from an encrypted reaction or comment `targetMessageKey.remoteJID`.
+ * Used when `info.chat` is not the announcement group.
+ */
+export function parseEngagementTargetChat(
+  message: Record<string, unknown>,
+): string | null {
+  const unwrapped = unwrapMessagePayload(message);
+  for (const wrapper of [unwrapped.encReactionMessage, unwrapped.encCommentMessage, unwrapped.commentMessage]) {
+    if (!isPlainObject(wrapper)) {
+      continue;
+    }
+    const key = wrapper.targetMessageKey;
+    if (!isPlainObject(key)) {
+      continue;
+    }
+    const chat =
+      trimNonEmpty(key.remoteJID) ??
+      trimNonEmpty(key.remoteJid) ??
+      trimNonEmpty(key.RemoteJID);
+    if (chat !== null) {
+      return chat;
+    }
+  }
+  return null;
+}
+
+/**
+ * Chat JID to use for allowlist checks. Prefers companion destination, then the
+ * encrypted target's remote JID, then the event chat.
+ */
+export function resolveEngagementChat(
+  message: Record<string, unknown>,
+  eventChat: string,
+): string {
+  return (
+    extractDeviceSentDestinationChat(message) ??
+    parseEngagementTargetChat(message) ??
+    eventChat.trim()
+  );
 }
 
 /**
@@ -249,8 +370,9 @@ export function buildReactionBreakdown(
 export function extractContextInfo(
   message: Record<string, unknown>,
 ): Record<string, unknown> | null {
-  if (isPlainObject(message.contextInfo)) {
-    return message.contextInfo;
+  const unwrapped = unwrapMessagePayload(message);
+  if (isPlainObject(unwrapped.contextInfo)) {
+    return unwrapped.contextInfo;
   }
 
   const wrappers = [
@@ -268,7 +390,7 @@ export function extractContextInfo(
   ] as const;
 
   for (const key of wrappers) {
-    const nested = message[key];
+    const nested = unwrapped[key];
     if (!isPlainObject(nested)) {
       continue;
     }
@@ -298,32 +420,33 @@ export function extractQuotedWaMessageId(
 export function extractMessageBodyText(
   message: Record<string, unknown>,
 ): string | null {
-  const conversation = trimNonEmpty(message.conversation);
+  const unwrapped = unwrapMessagePayload(message);
+  const conversation = trimNonEmpty(unwrapped.conversation);
   if (conversation !== null) {
     return conversation;
   }
-  const extended = message.extendedTextMessage;
+  const extended = unwrapped.extendedTextMessage;
   if (isPlainObject(extended)) {
     const text = trimNonEmpty(extended.text);
     if (text !== null) {
       return text;
     }
   }
-  const image = message.imageMessage;
+  const image = unwrapped.imageMessage;
   if (isPlainObject(image)) {
     const caption = trimNonEmpty(image.caption);
     if (caption !== null) {
       return caption;
     }
   }
-  const video = message.videoMessage;
+  const video = unwrapped.videoMessage;
   if (isPlainObject(video)) {
     const caption = trimNonEmpty(video.caption);
     if (caption !== null) {
       return caption;
     }
   }
-  const document = message.documentMessage;
+  const document = unwrapped.documentMessage;
   if (isPlainObject(document)) {
     const caption = trimNonEmpty(document.caption);
     if (caption !== null) {
@@ -341,7 +464,8 @@ export function parsePlainReactionMessage(
   message: Record<string, unknown>,
   reactionWaMessageId: string | null,
 ): ParsedReactionEvent | null {
-  const reaction = message.reactionMessage;
+  const unwrapped = unwrapMessagePayload(message);
+  const reaction = unwrapped.reactionMessage;
   if (!isPlainObject(reaction)) {
     return null;
   }
@@ -370,19 +494,20 @@ export function parseDecryptedReactionPayload(
   reactionWaMessageId: string | null,
   wrapperTargetWaMessageId: string | null = null,
 ): ParsedReactionEvent | null {
-  const fromWrapper = parsePlainReactionMessage(decrypted, reactionWaMessageId);
+  const unwrapped = unwrapMessagePayload(decrypted);
+  const fromWrapper = parsePlainReactionMessage(unwrapped, reactionWaMessageId);
   if (fromWrapper !== null) {
     return fromWrapper;
   }
   const targetId =
-    readMessageKeyId(decrypted.key) ??
-    trimNonEmpty(decrypted.messageID) ??
-    trimNonEmpty(decrypted.messageId) ??
+    readMessageKeyId(unwrapped.key) ??
+    trimNonEmpty(unwrapped.messageID) ??
+    trimNonEmpty(unwrapped.messageId) ??
     trimNonEmpty(wrapperTargetWaMessageId);
   if (targetId === null) {
     return null;
   }
-  const emoji = readReactionEmoji(decrypted.text ?? decrypted.reaction);
+  const emoji = readReactionEmoji(unwrapped.text ?? unwrapped.reaction);
   return {
     targetWaMessageId: targetId,
     emoji,
@@ -397,7 +522,8 @@ export function parseDecryptedReactionPayload(
 export function parseEncryptedReactionTargetId(
   message: Record<string, unknown>,
 ): string | null {
-  const encrypted = message.encReactionMessage;
+  const unwrapped = unwrapMessagePayload(message);
+  const encrypted = unwrapped.encReactionMessage;
   if (!isPlainObject(encrypted)) {
     return null;
   }
@@ -408,14 +534,16 @@ export function parseEncryptedReactionTargetId(
  * True when the inbound payload looks like an encrypted reaction needing decrypt.
  */
 export function hasEncryptedReaction(message: Record<string, unknown>): boolean {
-  return isPlainObject(message.encReactionMessage);
+  const unwrapped = unwrapMessagePayload(message);
+  return isPlainObject(unwrapped.encReactionMessage);
 }
 
 /**
  * True when the inbound payload is an encrypted announcement comment.
  */
 export function hasEncryptedComment(message: Record<string, unknown>): boolean {
-  return isPlainObject(message.encCommentMessage);
+  const unwrapped = unwrapMessagePayload(message);
+  return isPlainObject(unwrapped.encCommentMessage);
 }
 
 /**
@@ -423,14 +551,15 @@ export function hasEncryptedComment(message: Record<string, unknown>): boolean {
  * Checks the encrypted wrapper first, then a plaintext `commentMessage`.
  */
 export function parseCommentTargetId(message: Record<string, unknown>): string | null {
-  const encrypted = message.encCommentMessage;
+  const unwrapped = unwrapMessagePayload(message);
+  const encrypted = unwrapped.encCommentMessage;
   if (isPlainObject(encrypted)) {
     const fromEncrypted = readMessageKeyId(encrypted.targetMessageKey);
     if (fromEncrypted !== null) {
       return fromEncrypted;
     }
   }
-  const plain = message.commentMessage;
+  const plain = unwrapped.commentMessage;
   if (isPlainObject(plain)) {
     return readMessageKeyId(plain.targetMessageKey);
   }
@@ -464,7 +593,8 @@ export function parsePlainCommentEvent(
   message: Record<string, unknown>,
   replyWaMessageId: string,
 ): ParsedReplyEvent | null {
-  const comment = message.commentMessage;
+  const unwrapped = unwrapMessagePayload(message);
+  const comment = unwrapped.commentMessage;
   if (!isPlainObject(comment)) {
     return null;
   }
@@ -492,7 +622,8 @@ export function parseDecryptedCommentEvent(
  * Only the string `"REVOKE"` counts. A missing type, or numeric `0`, does not.
  */
 export function parseReplyRevokeId(message: Record<string, unknown>): string | null {
-  const protocol = message.protocolMessage;
+  const unwrapped = unwrapMessagePayload(message);
+  const protocol = unwrapped.protocolMessage;
   if (!isPlainObject(protocol)) {
     return null;
   }
@@ -510,27 +641,28 @@ export function parseQuotedReplyEvent(
   message: Record<string, unknown>,
   replyWaMessageId: string,
 ): ParsedReplyEvent | null {
+  const unwrapped = unwrapMessagePayload(message);
   const replyId = trimNonEmpty(replyWaMessageId);
   if (replyId === null) {
     return null;
   }
   // Reactions and announcement comments are handled by their own parsers.
   if (
-    isPlainObject(message.reactionMessage) ||
-    hasEncryptedReaction(message) ||
-    hasEncryptedComment(message) ||
-    isPlainObject(message.commentMessage)
+    isPlainObject(unwrapped.reactionMessage) ||
+    hasEncryptedReaction(unwrapped) ||
+    hasEncryptedComment(unwrapped) ||
+    isPlainObject(unwrapped.commentMessage)
   ) {
     return null;
   }
-  const quotedWaMessageId = extractQuotedWaMessageId(message);
+  const quotedWaMessageId = extractQuotedWaMessageId(unwrapped);
   if (quotedWaMessageId === null) {
     return null;
   }
   return {
     quotedWaMessageId,
     replyWaMessageId: replyId,
-    bodyPreview: truncateBodyPreview(extractMessageBodyText(message)),
+    bodyPreview: truncateBodyPreview(extractMessageBodyText(unwrapped)),
   };
 }
 
